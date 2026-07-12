@@ -24,6 +24,33 @@ type WorkerResponse = {
   steps: number;
 };
 
+function hslToRgb(h: number, s: number, l: number) {
+  const hue = ((h % 360) + 360) % 360 / 360;
+  const saturation = Math.max(0, Math.min(1, s));
+  const lightness = Math.max(0, Math.min(1, l));
+
+  const hueToRgb = (p: number, q: number, t: number) => {
+    let value = t;
+    if (value < 0) value += 1;
+    if (value > 1) value -= 1;
+    if (value < 1 / 6) return p + (q - p) * 6 * value;
+    if (value < 1 / 2) return q;
+    if (value < 2 / 3) return p + (q - p) * (2 / 3 - value) * 6;
+    return p;
+  };
+
+  const q = lightness < 0.5
+    ? lightness * (1 + saturation)
+    : lightness + saturation - lightness * saturation;
+  const p = 2 * lightness - q;
+
+  return {
+    r: Math.round(hueToRgb(p, q, hue + 1 / 3) * 255),
+    g: Math.round(hueToRgb(p, q, hue) * 255),
+    b: Math.round(hueToRgb(p, q, hue - 1 / 3) * 255),
+  };
+}
+
 self.onmessage = (event: MessageEvent<WorkerTask>) => {
   const payload = event.data;
   const pixelCount = (payload.rowEnd - payload.rowStart) * (payload.colEnd - payload.colStart);
@@ -55,11 +82,14 @@ self.onmessage = (event: MessageEvent<WorkerTask>) => {
       }
 
       steps += iter;
-      const brightness = iter === payload.maxIterations ? 0 : Math.floor((iter / payload.maxIterations) * 255);
+      const normalized = iter / payload.maxIterations;
+      const hue = 220 + normalized * 320;
+      const lightness = iter === payload.maxIterations ? 0.03 : 0.45 + 0.4 * Math.sin(normalized * Math.PI * 4);
+      const color = hslToRgb(hue, 0.78, lightness);
 
-      data[offset] = brightness;
-      data[offset + 1] = brightness;
-      data[offset + 2] = brightness;
+      data[offset] = color.r;
+      data[offset + 1] = color.g;
+      data[offset + 2] = color.b;
       data[offset + 3] = 255;
       offset += 4;
     }
