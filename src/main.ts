@@ -26,6 +26,8 @@ type RenderState = {
   workerCount: number;
   chunkMode: ChunkMode;
   zoomMode: 'instant' | 'smooth';
+  previewMode: 'current' | 'legacy';
+  fillViewport: boolean;
   view: ViewState;
   zoomAnimation: ZoomAnimationState | null;
   lastRenderMs: number;
@@ -95,6 +97,8 @@ const tileHeightInput = document.querySelector<HTMLInputElement>('#tileHeightInp
 const workerCountInput = document.querySelector<HTMLInputElement>('#workerCountInput')!;
 const chunkModeInput = document.querySelector<HTMLSelectElement>('#chunkModeInput')!;
 const zoomModeInput = document.querySelector<HTMLSelectElement>('#zoomModeInput')!;
+const fillViewportInput = document.querySelector<HTMLInputElement>('#fillViewportInput')!;
+const previewModeInput = document.querySelector<HTMLSelectElement>('#previewModeInput')!;
 const iterationsOutput = document.querySelector<HTMLOutputElement>('#iterationsOutput')!;
 const tileWidthOutput = document.querySelector<HTMLOutputElement>('#tileWidthOutput')!;
 const tileHeightOutput = document.querySelector<HTMLOutputElement>('#tileHeightOutput')!;
@@ -130,6 +134,8 @@ const state: RenderState = {
   workerCount: Number(workerCountInput.value),
   chunkMode: chunkModeInput.value as ChunkMode,
   zoomMode: zoomModeInput.value as 'instant' | 'smooth',
+  previewMode: previewModeInput.value as 'current' | 'legacy',
+  fillViewport: fillViewportInput.checked,
   view: {
     centerRe: 0,
     centerIm: 0,
@@ -161,6 +167,15 @@ function updateStats() {
 }
 
 function syncCanvasSize() {
+  if (state.fillViewport) {
+    const viewportWidth = Math.max(320, window.innerWidth - 340);
+    const viewportHeight = Math.max(240, window.innerHeight - 32);
+    state.width = viewportWidth;
+    state.height = viewportHeight;
+    widthInput.value = String(state.width);
+    heightInput.value = String(state.height);
+  }
+
   canvas.width = state.width;
   canvas.height = state.height;
   canvas.style.width = `${state.width}px`;
@@ -176,6 +191,8 @@ function syncControlValues() {
   workerCountInput.value = String(state.workerCount);
   chunkModeInput.value = state.chunkMode;
   zoomModeInput.value = state.zoomMode;
+  fillViewportInput.checked = state.fillViewport;
+  previewModeInput.value = state.previewMode;
   iterationsOutput.value = String(state.maxIterations);
   tileWidthOutput.value = String(state.tileWidth);
   tileHeightOutput.value = String(state.tileHeight);
@@ -409,6 +426,19 @@ function drawZoomPreview(scale: number, originX: number, originY: number, previe
   drawingContext.restore();
 }
 
+function drawFallbackPreview() {
+  if (state.previewMode === 'legacy') {
+    drawingContext.save();
+    drawingContext.fillStyle = '#0f172a';
+    drawingContext.fillRect(0, 0, state.width, state.height);
+    drawingContext.restore();
+    return;
+  }
+
+  const previousFrame = drawingContext.getImageData(0, 0, state.width, state.height);
+  drawingContext.putImageData(previousFrame, 0, 0);
+}
+
 function cancelZoomAnimation() {
   if (state.zoomAnimation?.frameId !== null && state.zoomAnimation?.frameId !== undefined) {
     cancelAnimationFrame(state.zoomAnimation.frameId);
@@ -451,7 +481,11 @@ function beginSmoothZoom(factor: number, screenX: number, screenY: number) {
       centerIm: animation.from.centerIm + (animation.to.centerIm - animation.from.centerIm) * eased,
       zoom: animation.from.zoom + (animation.to.zoom - animation.from.zoom) * eased,
     };
-    drawZoomPreview(currentScale, animation.originX, animation.originY, animation.previewCanvas);
+    if (state.previewMode === 'legacy') {
+      drawZoomPreview(currentScale, animation.originX, animation.originY, animation.previewCanvas);
+    } else {
+      drawFallbackPreview();
+    }
 
     if (progress < 1) {
       animation.frameId = requestAnimationFrame(step);
@@ -577,6 +611,8 @@ function runBenchmarkSweep() {
 function wireControls() {
   widthInput.addEventListener('change', () => {
     state.width = Math.max(200, Number(widthInput.value));
+    state.fillViewport = false;
+    fillViewportInput.checked = false;
     widthInput.value = String(state.width);
     syncCanvasSize();
     requestRender();
@@ -584,6 +620,8 @@ function wireControls() {
 
   heightInput.addEventListener('change', () => {
     state.height = Math.max(200, Number(heightInput.value));
+    state.fillViewport = false;
+    fillViewportInput.checked = false;
     heightInput.value = String(state.height);
     syncCanvasSize();
     requestRender();
@@ -622,6 +660,16 @@ function wireControls() {
     state.zoomMode = zoomModeInput.value as 'instant' | 'smooth';
   });
 
+  fillViewportInput.addEventListener('change', () => {
+    state.fillViewport = fillViewportInput.checked;
+    syncCanvasSize();
+    requestRender();
+  });
+
+  previewModeInput.addEventListener('change', () => {
+    state.previewMode = previewModeInput.value as 'current' | 'legacy';
+  });
+
   renderButton.addEventListener('click', () => requestRender());
   resetButton.addEventListener('click', () => resetView());
   exportLogsButton.addEventListener('click', () => exportLogs());
@@ -644,5 +692,12 @@ function init() {
   canvas.style.cursor = 'grab';
   requestRender();
 }
+
+window.addEventListener('resize', () => {
+  if (state.fillViewport) {
+    syncCanvasSize();
+    requestRender();
+  }
+});
 
 init();
