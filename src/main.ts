@@ -28,6 +28,7 @@ type RenderState = {
   zoomMode: 'instant' | 'smooth';
   previewMode: 'current' | 'legacy';
   fillViewport: boolean;
+  zoomSensitivity: number;
   view: ViewState;
   zoomAnimation: ZoomAnimationState | null;
   lastRenderMs: number;
@@ -97,12 +98,14 @@ const tileHeightInput = document.querySelector<HTMLInputElement>('#tileHeightInp
 const workerCountInput = document.querySelector<HTMLInputElement>('#workerCountInput')!;
 const chunkModeInput = document.querySelector<HTMLSelectElement>('#chunkModeInput')!;
 const zoomModeInput = document.querySelector<HTMLSelectElement>('#zoomModeInput')!;
+const zoomSensitivityInput = document.querySelector<HTMLInputElement>('#zoomSensitivityInput')!;
 const fillViewportInput = document.querySelector<HTMLInputElement>('#fillViewportInput')!;
 const previewModeInput = document.querySelector<HTMLSelectElement>('#previewModeInput')!;
 const iterationsOutput = document.querySelector<HTMLOutputElement>('#iterationsOutput')!;
 const tileWidthOutput = document.querySelector<HTMLOutputElement>('#tileWidthOutput')!;
 const tileHeightOutput = document.querySelector<HTMLOutputElement>('#tileHeightOutput')!;
 const workerCountOutput = document.querySelector<HTMLOutputElement>('#workerCountOutput')!;
+const zoomSensitivityOutput = document.querySelector<HTMLOutputElement>('#zoomSensitivityOutput')!;
 const logCountOutput = document.querySelector<HTMLElement>('#logCountOutput')!;
 const lastRenderOutput = document.querySelector<HTMLElement>('#lastRenderOutput')!;
 const zoomOutput = document.querySelector<HTMLElement>('#zoomOutput')!;
@@ -136,6 +139,7 @@ const state: RenderState = {
   zoomMode: zoomModeInput.value as 'instant' | 'smooth',
   previewMode: previewModeInput.value as 'current' | 'legacy',
   fillViewport: fillViewportInput.checked,
+  zoomSensitivity: Number(zoomSensitivityInput.value),
   view: {
     centerRe: 0,
     centerIm: 0,
@@ -191,12 +195,14 @@ function syncControlValues() {
   workerCountInput.value = String(state.workerCount);
   chunkModeInput.value = state.chunkMode;
   zoomModeInput.value = state.zoomMode;
+  zoomSensitivityInput.value = String(state.zoomSensitivity);
   fillViewportInput.checked = state.fillViewport;
   previewModeInput.value = state.previewMode;
   iterationsOutput.value = String(state.maxIterations);
   tileWidthOutput.value = String(state.tileWidth);
   tileHeightOutput.value = String(state.tileHeight);
   workerCountOutput.value = String(state.workerCount);
+  zoomSensitivityOutput.value = state.zoomSensitivity.toFixed(1);
 }
 
 function terminateWorkers() {
@@ -539,9 +545,19 @@ function handlePointerUp() {
   canvas.style.cursor = 'grab';
 }
 
+function getWheelZoomFactor(deltaY: number) {
+  const baseFactor = deltaY < 0 ? 1.1 : 1 / 1.1;
+  return Math.pow(baseFactor, state.zoomSensitivity);
+}
+
+function getClickZoomFactor(direction: 'in' | 'out') {
+  const baseFactor = direction === 'in' ? 1.25 : 1 / 1.25;
+  return Math.pow(baseFactor, state.zoomSensitivity);
+}
+
 function handleWheel(event: WheelEvent) {
   event.preventDefault();
-  const factor = event.deltaY < 0 ? 1.1 : 0.9;
+  const factor = getWheelZoomFactor(event.deltaY);
   if (state.zoomMode === 'smooth') {
     beginSmoothZoom(factor, event.offsetX, event.offsetY);
   } else {
@@ -551,18 +567,20 @@ function handleWheel(event: WheelEvent) {
 
 function handleClick(event: MouseEvent) {
   if (event.button !== 0) {
+    const factor = getClickZoomFactor('out');
     if (state.zoomMode === 'smooth') {
-      beginSmoothZoom(0.9, event.offsetX, event.offsetY);
+      beginSmoothZoom(factor, event.offsetX, event.offsetY);
     } else {
-      applyZoom(0.9, event.offsetX, event.offsetY);
+      applyZoom(factor, event.offsetX, event.offsetY);
     }
     return;
   }
 
+  const factor = getClickZoomFactor('in');
   if (state.zoomMode === 'smooth') {
-    beginSmoothZoom(1.25, event.offsetX, event.offsetY);
+    beginSmoothZoom(factor, event.offsetX, event.offsetY);
   } else {
-    applyZoom(1.25, event.offsetX, event.offsetY);
+    applyZoom(factor, event.offsetX, event.offsetY);
   }
 }
 
@@ -658,6 +676,11 @@ function wireControls() {
 
   zoomModeInput.addEventListener('change', () => {
     state.zoomMode = zoomModeInput.value as 'instant' | 'smooth';
+  });
+
+  zoomSensitivityInput.addEventListener('input', () => {
+    state.zoomSensitivity = Number(zoomSensitivityInput.value);
+    zoomSensitivityOutput.value = state.zoomSensitivity.toFixed(1);
   });
 
   fillViewportInput.addEventListener('change', () => {
