@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Mandelbrot Scratchpad</title>
+    <script type="module" crossorigin src="/assets/index-RXBnO3ni.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-DSlXJ_Y4.css">
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="controls-panel">
+        <h1>Mandelbrot Scratchpad</h1>
+        <p class="subtitle">Single-threaded proof of concept for canvas performance.</p>
+
+        <label>
+          <span>Canvas width</span>
+          <input id="widthInput" type="number" min="200" max="2000" step="50" value="800" />
+        </label>
+
+        <label>
+          <span>Canvas height</span>
+          <input id="heightInput" type="number" min="200" max="2000" step="50" value="600" />
+        </label>
+
+        <label>
+          <span>Max iterations</span>
+          <input id="iterationsInput" type="range" min="32" max="2000" step="8" value="256" />
+          <output id="iterationsOutput">256</output>
+        </label>
+
+        <label>
+          <span>Tile width</span>
+          <input id="tileWidthInput" type="range" min="8" max="512" step="8" value="64" />
+          <output id="tileWidthOutput">64</output>
+        </label>
+
+        <label>
+          <span>Tile height</span>
+          <input id="tileHeightInput" type="range" min="8" max="512" step="8" value="64" />
+          <output id="tileHeightOutput">64</output>
+        </label>
+
+        <label>
+          <span>Worker count</span>
+          <input id="workerCountInput" type="range" min="1" max="8" step="1" value="4" />
+          <output id="workerCountOutput">4</output>
+        </label>
+
+        <label>
+          <span>Chunk mode</span>
+          <select id="chunkModeInput">
+            <option value="rectangles">Rectangles</option>
+            <option value="none">No chunking</option>
+          </select>
+        </label>
+
+        <label>
+          <span>Zoom mode</span>
+          <select id="zoomModeInput">
+            <option value="instant">Instant</option>
+            <option value="smooth">Smooth</option>
+          </select>
+        </label>
+
+        <div class="button-row">
+          <button id="renderButton" type="button">Render</button>
+          <button id="resetButton" type="button">Reset view</button>
+        </div>
+
+        <div class="button-row">
+          <button id="exportLogsButton" type="button">Export logs</button>
+          <button id="benchmarkButton" type="button">Benchmark sweep</button>
+        </div>
+
+        <div class="stats-card">
+          <div><strong>Last render:</strong> <span id="lastRenderOutput">—</span></div>
+          <div><strong>Zoom:</strong> <span id="zoomOutput">1.00×</span></div>
+          <div><strong>Iterations:</strong> <span id="activeIterationsOutput">256</span></div>
+          <div><strong>Steps:</strong> <span id="stepOutput">0</span></div>
+          <div><strong>Logs:</strong> <span id="logCountOutput">0</span></div>
+          <div class="hint">Drag to pan. Scroll to zoom. Click to zoom in; right-click to zoom out.</div>
+        </div>
+      </aside>
+
+      <main class="canvas-panel">
+        <canvas id="fractalCanvas"></canvas>
+      </main>
+    </div>
+
+  </body>
+</html>
