@@ -814,7 +814,7 @@ function beginSmoothZoom(factor: number, screenX: number, screenY: number) {
   const from = { ...state.view };
   const to = computeTargetView(factor, screenX, screenY, from);
   const isZoomingOut = to.zoom < from.zoom;
-  const previewFrame = isZoomingOut ? findBestPreviewFrame(to) : findBestPreviewFrame(from);
+  const previewFrame = isZoomingOut ? findBestPreviewFrame(to) : null;
   const previewCanvas = createSmoothPreviewCanvas(from, previewFrame);
   markDebug('zoom:smooth-begin', {
     factor: Number(factor.toPrecision(8)),
