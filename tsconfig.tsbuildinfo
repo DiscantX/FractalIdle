@@ -1,1 +1,1 @@
-{"root":["./src/main.ts","./src/mandelbrot-worker.ts"],"version":"5.9.3"}
+{"root":["./src/main.ts","./src/mandelbrot-worker.ts","./src/state.ts","./src/types.ts","./src/services/logger.ts","./src/services/renderer.ts","./src/services/zoom-manager.ts","./src/ui/dom.ts","./src/ui/ui-manager.ts","./src/utils/color.ts","./src/utils/debug.ts","./src/utils/math.ts"],"version":"5.9.3"}
