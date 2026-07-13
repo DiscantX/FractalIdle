@@ -57,6 +57,8 @@ export function renderFrame(renderId: number, focalX?: number, focalY?: number) 
   let completedChunks = 0;
   let solidGuessedChunks = 0;
   let culledPixels = 0;
+  let periodicityShortCircuits = 0;
+
   markDebug('render:start', {
     width: state.width,
     height: state.height,
@@ -129,6 +131,7 @@ export function renderFrame(renderId: number, focalX?: number, focalY?: number) 
       totalChunks,
       solidGuessedChunks,
       culledPixels,
+      periodicityShortCircuits,
       ms: Number(state.lastRenderMs.toFixed(2)),
     }, renderId);
 
@@ -166,6 +169,7 @@ export function renderFrame(renderId: number, focalX?: number, focalY?: number) 
       scaleIm,
       solidGuessing: state.solidGuessing,
       geometricCulling: state.geometricCulling,
+      periodicityChecking: state.periodicityChecking,
       colorMode: state.colorMode,
       palette: state.palette,
       reverseColors: state.reverseColors,
@@ -210,7 +214,9 @@ export function renderFrame(renderId: number, focalX?: number, focalY?: number) 
       if (response.solidGuessed) {
         solidGuessedChunks += 1;
       }
+
       culledPixels += response.culledPixels ?? 0;
+      periodicityShortCircuits += response.periodicityShortCircuits ?? 0;
 
       activeChunkCount -= 1;
       drawingContext.putImageData(imageData, 0, 0);

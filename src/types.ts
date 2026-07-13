@@ -39,6 +39,7 @@ export type RenderState = {
   chunkMode: ChunkMode;
   solidGuessing: boolean;
   geometricCulling: boolean;
+  periodicityChecking: boolean;
   zoomMode: 'instant' | 'smooth';
   previewMode: 'current' | 'legacy';
   fillViewport: boolean;
@@ -105,6 +106,7 @@ export type WorkerTask = {
   colorSpace: ColorSpace;
   solidGuessing: boolean;
   geometricCulling: boolean;
+  periodicityChecking: boolean;
 };
 
 export type WorkerResponse = {
@@ -117,6 +119,7 @@ export type WorkerResponse = {
   steps: number;
   solidGuessed?: boolean;
   culledPixels?: number;
+  periodicityShortCircuits?: number;  
 };
 
 export type RenderLogEntry = {

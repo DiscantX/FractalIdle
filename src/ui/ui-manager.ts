@@ -26,6 +26,7 @@ import {
   chunkModeInput,
   geometricCullingInput,
   solidGuessingInput,
+  periodicityCheckingInput,
   zoomModeInput,
   zoomSensitivityInput,
   zoomSensitivityOutput,
@@ -137,6 +138,7 @@ export function syncControlValues() {
   chunkModeInput.value = state.chunkMode;
   solidGuessingInput.checked = state.solidGuessing;
   geometricCullingInput.checked = state.geometricCulling;
+  periodicityCheckingInput.checked = state.periodicityChecking;
   zoomModeInput.value = state.zoomMode;
   zoomSensitivityInput.value = String(state.zoomSensitivity);
   fillViewportInput.checked = state.fillViewport;
@@ -311,6 +313,11 @@ export function wireControls() {
 
   geometricCullingInput.addEventListener('change', () => {
     state.geometricCulling = geometricCullingInput.checked;
+    requestRender();
+  });
+
+  periodicityCheckingInput.addEventListener('change', () => {
+    state.periodicityChecking = periodicityCheckingInput.checked;
     requestRender();
   });
 

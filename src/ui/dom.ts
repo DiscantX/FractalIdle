@@ -12,6 +12,7 @@ export const workerCountOutput = document.querySelector<HTMLInputElement>('#work
 export const chunkModeInput = document.querySelector<HTMLSelectElement>('#chunkModeInput')!;
 export const solidGuessingInput = document.querySelector<HTMLInputElement>('#solidGuessingInput')!;
 export const geometricCullingInput = document.querySelector<HTMLInputElement>('#geometricCullingInput')!;
+export const periodicityCheckingInput = document.querySelector<HTMLInputElement>('#periodicityCheckingInput')!;
 export const zoomModeInput = document.querySelector<HTMLSelectElement>('#zoomModeInput')!;
 export const zoomSensitivityInput = document.querySelector<HTMLInputElement>('#zoomSensitivityInput')!;
 export const zoomSensitivityOutput = document.querySelector<HTMLInputElement>('#zoomSensitivityValueInput')!;
