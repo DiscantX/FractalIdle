@@ -81,6 +81,97 @@
           </select>
         </label>
 
+        <div class="color-section">
+          <h2>Colors</h2>
+
+          <label>
+            <span>Color mode</span>
+            <select id="colorModeInput">
+              <option value="black-white">Black & white</option>
+              <option value="escape-time">Escape-time</option>
+              <option value="smooth">Smooth</option>
+              <option value="distance-estimation">Distance estimation</option>
+            </select>
+          </label>
+
+          <label>
+            <span>Color palette</span>
+            <select id="paletteInput">
+              <option value="viridis">Viridis</option>
+              <option value="plasma">Plasma</option>
+              <option value="inferno">Inferno</option>
+              <option value="magma">Magma</option>
+              <option value="turbo">Turbo</option>
+              <option value="rainbow">Rainbow</option>
+              <option value="cividis">Cividis</option>
+              <option value="cool">Cool</option>
+              <option value="warm">Warm</option>
+              <option value="grayscale">Grayscale</option>
+            </select>
+          </label>
+
+          <label>
+            <span>Color cycles</span>
+            <input id="colorCyclesInput" type="range" min="1" max="8" step="1" value="1" />
+            <output id="colorCyclesOutput">1</output>
+          </label>
+
+          <label>
+            <span>Reverse colors</span>
+            <input id="reverseColorsInput" type="checkbox" />
+          </label>
+
+          <label>
+            <span>Smooth coloring</span>
+            <input id="smoothColoringInput" type="checkbox" checked />
+          </label>
+
+          <label>
+            <span>Auto-adjust palette</span>
+            <input id="autoAdjustColorsInput" type="checkbox" checked />
+          </label>
+
+          <label>
+            <span>Palette min iterations</span>
+            <input id="paletteMinInput" type="range" min="0" max="2000" step="8" value="0" />
+            <output id="paletteMinOutput">0</output>
+          </label>
+
+          <label>
+            <span>Palette max iterations</span>
+            <input id="paletteMaxInput" type="range" min="1" max="2000" step="8" value="256" />
+            <output id="paletteMaxOutput">256</output>
+          </label>
+
+          <label>
+            <span>Hue shift</span>
+            <input id="hueShiftInput" type="range" min="0" max="360" step="1" value="0" />
+            <output id="hueShiftOutput">0°</output>
+          </label>
+
+          <label>
+            <span>Saturation</span>
+            <input id="saturationInput" type="range" min="0" max="2" step="0.05" value="1" />
+            <output id="saturationOutput">1.0</output>
+          </label>
+
+          <label>
+            <span>Lightness</span>
+            <input id="lightnessInput" type="range" min="0" max="2" step="0.05" value="1" />
+            <output id="lightnessOutput">1.0</output>
+          </label>
+
+          <label>
+            <span>Color space</span>
+            <select id="colorSpaceInput">
+              <option value="hsl">HSL</option>
+              <option value="hsluv">HSLuv</option>
+              <option value="lch">LCh</option>
+              <option value="okhsl">Okhsl</option>
+            </select>
+          </label>
+        </div>
+
         <div class="button-row">
           <button id="renderButton" type="button">Render</button>
           <button id="resetButton" type="button">Reset view</button>

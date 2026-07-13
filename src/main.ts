@@ -17,6 +17,10 @@ type ZoomAnimationState = {
 
 type ChunkMode = 'none' | 'rectangles';
 
+type ColorMode = 'black-white' | 'escape-time' | 'smooth' | 'distance-estimation';
+type PaletteName = 'viridis' | 'plasma' | 'inferno' | 'magma' | 'turbo' | 'rainbow' | 'cividis' | 'cool' | 'warm' | 'grayscale';
+type ColorSpace = 'hsl' | 'hsluv' | 'lch' | 'okhsl';
+
 type RenderState = {
   width: number;
   height: number;
@@ -29,6 +33,18 @@ type RenderState = {
   previewMode: 'current' | 'legacy';
   fillViewport: boolean;
   zoomSensitivity: number;
+  colorMode: ColorMode;
+  palette: PaletteName;
+  reverseColors: boolean;
+  smoothColoring: boolean;
+  colorCycles: number;
+  autoAdjustColors: boolean;
+  paletteMinIterations: number;
+  paletteMaxIterations: number;
+  hueShift: number;
+  saturation: number;
+  lightness: number;
+  colorSpace: ColorSpace;
   view: ViewState;
   zoomAnimation: ZoomAnimationState | null;
   lastRenderMs: number;
@@ -101,11 +117,29 @@ const zoomModeInput = document.querySelector<HTMLSelectElement>('#zoomModeInput'
 const zoomSensitivityInput = document.querySelector<HTMLInputElement>('#zoomSensitivityInput')!;
 const fillViewportInput = document.querySelector<HTMLInputElement>('#fillViewportInput')!;
 const previewModeInput = document.querySelector<HTMLSelectElement>('#previewModeInput')!;
+const colorModeInput = document.querySelector<HTMLSelectElement>('#colorModeInput')!;
+const paletteInput = document.querySelector<HTMLSelectElement>('#paletteInput')!;
+const colorCyclesInput = document.querySelector<HTMLInputElement>('#colorCyclesInput')!;
+const reverseColorsInput = document.querySelector<HTMLInputElement>('#reverseColorsInput')!;
+const smoothColoringInput = document.querySelector<HTMLInputElement>('#smoothColoringInput')!;
+const autoAdjustColorsInput = document.querySelector<HTMLInputElement>('#autoAdjustColorsInput')!;
+const paletteMinInput = document.querySelector<HTMLInputElement>('#paletteMinInput')!;
+const paletteMaxInput = document.querySelector<HTMLInputElement>('#paletteMaxInput')!;
+const hueShiftInput = document.querySelector<HTMLInputElement>('#hueShiftInput')!;
+const saturationInput = document.querySelector<HTMLInputElement>('#saturationInput')!;
+const lightnessInput = document.querySelector<HTMLInputElement>('#lightnessInput')!;
+const colorSpaceInput = document.querySelector<HTMLSelectElement>('#colorSpaceInput')!;
 const iterationsOutput = document.querySelector<HTMLOutputElement>('#iterationsOutput')!;
 const tileWidthOutput = document.querySelector<HTMLOutputElement>('#tileWidthOutput')!;
 const tileHeightOutput = document.querySelector<HTMLOutputElement>('#tileHeightOutput')!;
 const workerCountOutput = document.querySelector<HTMLOutputElement>('#workerCountOutput')!;
 const zoomSensitivityOutput = document.querySelector<HTMLOutputElement>('#zoomSensitivityOutput')!;
+const colorCyclesOutput = document.querySelector<HTMLOutputElement>('#colorCyclesOutput')!;
+const paletteMinOutput = document.querySelector<HTMLOutputElement>('#paletteMinOutput')!;
+const paletteMaxOutput = document.querySelector<HTMLOutputElement>('#paletteMaxOutput')!;
+const hueShiftOutput = document.querySelector<HTMLOutputElement>('#hueShiftOutput')!;
+const saturationOutput = document.querySelector<HTMLOutputElement>('#saturationOutput')!;
+const lightnessOutput = document.querySelector<HTMLOutputElement>('#lightnessOutput')!;
 const logCountOutput = document.querySelector<HTMLElement>('#logCountOutput')!;
 const lastRenderOutput = document.querySelector<HTMLElement>('#lastRenderOutput')!;
 const zoomOutput = document.querySelector<HTMLElement>('#zoomOutput')!;
@@ -140,6 +174,18 @@ const state: RenderState = {
   previewMode: previewModeInput.value as 'current' | 'legacy',
   fillViewport: fillViewportInput.checked,
   zoomSensitivity: Number(zoomSensitivityInput.value),
+  colorMode: colorModeInput.value as ColorMode,
+  palette: paletteInput.value as PaletteName,
+  reverseColors: reverseColorsInput.checked,
+  smoothColoring: smoothColoringInput.checked,
+  colorCycles: Number(colorCyclesInput.value),
+  autoAdjustColors: autoAdjustColorsInput.checked,
+  paletteMinIterations: Number(paletteMinInput.value),
+  paletteMaxIterations: Number(paletteMaxInput.value),
+  hueShift: Number(hueShiftInput.value),
+  saturation: Number(saturationInput.value),
+  lightness: Number(lightnessInput.value),
+  colorSpace: colorSpaceInput.value as ColorSpace,
   view: {
     centerRe: 0,
     centerIm: 0,
@@ -198,11 +244,29 @@ function syncControlValues() {
   zoomSensitivityInput.value = String(state.zoomSensitivity);
   fillViewportInput.checked = state.fillViewport;
   previewModeInput.value = state.previewMode;
+  colorModeInput.value = state.colorMode;
+  paletteInput.value = state.palette;
+  colorCyclesInput.value = String(state.colorCycles);
+  reverseColorsInput.checked = state.reverseColors;
+  smoothColoringInput.checked = state.smoothColoring;
+  autoAdjustColorsInput.checked = state.autoAdjustColors;
+  paletteMinInput.value = String(state.paletteMinIterations);
+  paletteMaxInput.value = String(state.paletteMaxIterations);
+  hueShiftInput.value = String(state.hueShift);
+  saturationInput.value = String(state.saturation);
+  lightnessInput.value = String(state.lightness);
+  colorSpaceInput.value = state.colorSpace;
   iterationsOutput.value = String(state.maxIterations);
   tileWidthOutput.value = String(state.tileWidth);
   tileHeightOutput.value = String(state.tileHeight);
   workerCountOutput.value = String(state.workerCount);
   zoomSensitivityOutput.value = state.zoomSensitivity.toFixed(1);
+  colorCyclesOutput.value = String(state.colorCycles);
+  paletteMinOutput.value = String(state.paletteMinIterations);
+  paletteMaxOutput.value = String(state.paletteMaxIterations);
+  hueShiftOutput.value = `${state.hueShift}°`;
+  saturationOutput.value = state.saturation.toFixed(2);
+  lightnessOutput.value = state.lightness.toFixed(2);
 }
 
 function terminateWorkers() {
@@ -361,6 +425,18 @@ function renderFrame(renderId: number) {
       colEnd: nextTask.colEnd,
       scaleRe,
       scaleIm,
+      colorMode: state.colorMode,
+      palette: state.palette,
+      reverseColors: state.reverseColors,
+      smoothColoring: state.smoothColoring,
+      colorCycles: state.colorCycles,
+      autoAdjustColors: state.autoAdjustColors,
+      paletteMinIterations: state.paletteMinIterations,
+      paletteMaxIterations: state.paletteMaxIterations,
+      hueShift: state.hueShift,
+      saturation: state.saturation,
+      lightness: state.lightness,
+      colorSpace: state.colorSpace,
     });
   };
 
@@ -681,6 +757,72 @@ function wireControls() {
   zoomSensitivityInput.addEventListener('input', () => {
     state.zoomSensitivity = Number(zoomSensitivityInput.value);
     zoomSensitivityOutput.value = state.zoomSensitivity.toFixed(1);
+  });
+
+  colorModeInput.addEventListener('change', () => {
+    state.colorMode = colorModeInput.value as ColorMode;
+    requestRender();
+  });
+
+  paletteInput.addEventListener('change', () => {
+    state.palette = paletteInput.value as PaletteName;
+    requestRender();
+  });
+
+  colorCyclesInput.addEventListener('input', () => {
+    state.colorCycles = Number(colorCyclesInput.value);
+    colorCyclesOutput.value = String(state.colorCycles);
+    requestRender();
+  });
+
+  reverseColorsInput.addEventListener('change', () => {
+    state.reverseColors = reverseColorsInput.checked;
+    requestRender();
+  });
+
+  smoothColoringInput.addEventListener('change', () => {
+    state.smoothColoring = smoothColoringInput.checked;
+    requestRender();
+  });
+
+  autoAdjustColorsInput.addEventListener('change', () => {
+    state.autoAdjustColors = autoAdjustColorsInput.checked;
+    requestRender();
+  });
+
+  paletteMinInput.addEventListener('input', () => {
+    state.paletteMinIterations = Number(paletteMinInput.value);
+    paletteMinOutput.value = String(state.paletteMinIterations);
+    requestRender();
+  });
+
+  paletteMaxInput.addEventListener('input', () => {
+    state.paletteMaxIterations = Number(paletteMaxInput.value);
+    paletteMaxOutput.value = String(state.paletteMaxIterations);
+    requestRender();
+  });
+
+  hueShiftInput.addEventListener('input', () => {
+    state.hueShift = Number(hueShiftInput.value);
+    hueShiftOutput.value = `${state.hueShift}°`;
+    requestRender();
+  });
+
+  saturationInput.addEventListener('input', () => {
+    state.saturation = Number(saturationInput.value);
+    saturationOutput.value = state.saturation.toFixed(2);
+    requestRender();
+  });
+
+  lightnessInput.addEventListener('input', () => {
+    state.lightness = Number(lightnessInput.value);
+    lightnessOutput.value = state.lightness.toFixed(2);
+    requestRender();
+  });
+
+  colorSpaceInput.addEventListener('change', () => {
+    state.colorSpace = colorSpaceInput.value as ColorSpace;
+    requestRender();
   });
 
   fillViewportInput.addEventListener('change', () => {
