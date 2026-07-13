@@ -105,6 +105,29 @@ type BenchmarkCase = {
   zoomMode: 'instant' | 'smooth';
 };
 
+type DebugEvent = {
+  index: number;
+  time: number;
+  label: string;
+  renderId: number;
+  activeRenderId: number;
+  zoomGeneration: number;
+  view: ViewState;
+  details?: Record<string, number | string | boolean | null>;
+};
+
+declare global {
+  interface Window {
+    mandelbrotDebug?: {
+      enabled: boolean;
+      events: DebugEvent[];
+      clear: () => void;
+      dump: () => DebugEvent[];
+      table: () => void;
+    };
+  }
+}
+
 const canvas = document.querySelector<HTMLCanvasElement>('#fractalCanvas')!;
 const widthInput = document.querySelector<HTMLInputElement>('#widthInput')!;
 const heightInput = document.querySelector<HTMLInputElement>('#heightInput')!;
@@ -165,6 +188,9 @@ const renderLogs: RenderLogEntry[] = [];
 const STORAGE_KEY = 'mandelbrot-render-logs';
 let benchmarkTimer: number | null = null;
 let zoomAnimationGeneration = 0;
+let lastCompletedFrame: HTMLCanvasElement | null = null;
+let lastCompletedView: ViewState | null = null;
+const debugEvents: DebugEvent[] = [];
 
 const state: RenderState = {
   width: Number(widthInput.value),
@@ -222,6 +248,58 @@ function updateStats() {
   zoomOutput.textContent = `${state.view.zoom.toFixed(2)}×`;
   activeIterationsOutput.textContent = `${state.maxIterations}`;
   stepOutput.textContent = `${state.lastSteps.toLocaleString()}`;
+}
+
+function formatViewForDebug(view: ViewState) {
+  return {
+    centerRe: Number(view.centerRe.toPrecision(8)),
+    centerIm: Number(view.centerIm.toPrecision(8)),
+    zoom: Number(view.zoom.toPrecision(8)),
+  };
+}
+
+function markDebug(label: string, details?: Record<string, number | string | boolean | null>, renderId = state.activeRenderId) {
+  if (!window.mandelbrotDebug?.enabled) {
+    return;
+  }
+
+  const event: DebugEvent = {
+    index: debugEvents.length,
+    time: Number(performance.now().toFixed(2)),
+    label,
+    renderId,
+    activeRenderId: state.activeRenderId,
+    zoomGeneration: zoomAnimationGeneration,
+    view: formatViewForDebug(state.view),
+    details,
+  };
+  debugEvents.push(event);
+  console.debug('[mandelbrot]', event);
+}
+
+function installDebugTools() {
+  window.mandelbrotDebug = {
+    enabled: false,
+    events: debugEvents,
+    clear: () => {
+      debugEvents.length = 0;
+    },
+    dump: () => debugEvents.map((event) => ({ ...event, view: { ...event.view }, details: event.details ? { ...event.details } : undefined })),
+    table: () => {
+      console.table(debugEvents.map((event) => ({
+        index: event.index,
+        time: event.time,
+        label: event.label,
+        renderId: event.renderId,
+        activeRenderId: event.activeRenderId,
+        zoomGeneration: event.zoomGeneration,
+        zoom: event.view.zoom,
+        centerRe: event.view.centerRe,
+        centerIm: event.view.centerIm,
+        details: event.details ? JSON.stringify(event.details) : '',
+      })));
+    },
+  };
 }
 
 let renderTimerStart: number | null = null;
@@ -325,9 +403,60 @@ function terminateWorkers() {
 }
 
 function cancelActiveRender() {
+  markDebug('render:cancel-active', {
+    workerCount: activeWorkers.length,
+    nextActiveRenderId: state.activeRenderId + 1,
+  });
   state.activeRenderId += 1;
   terminateWorkers();
   updateRenderStatus(false);
+}
+
+function cacheCompletedFrame(view: ViewState) {
+  const frameCanvas = document.createElement('canvas');
+  frameCanvas.width = state.width;
+  frameCanvas.height = state.height;
+  const frameContext = frameCanvas.getContext('2d');
+  if (!frameContext) {
+    return;
+  }
+
+  frameContext.imageSmoothingEnabled = false;
+  frameContext.drawImage(canvas, 0, 0, state.width, state.height);
+  lastCompletedFrame = frameCanvas;
+  lastCompletedView = { ...view };
+}
+
+function hasMatchingCompletedFrame() {
+  return lastCompletedFrame !== null
+    && lastCompletedView !== null
+    && lastCompletedFrame.width === state.width
+    && lastCompletedFrame.height === state.height;
+}
+
+function drawViewProjection(
+  targetContext: CanvasRenderingContext2D,
+  sourceCanvas: HTMLCanvasElement,
+  sourceView: ViewState,
+  targetView: ViewState,
+) {
+  const targetViewWidth = 4 / targetView.zoom;
+  const targetViewHeight = targetViewWidth * (state.height / state.width);
+  const targetScaleRe = targetViewWidth / state.width;
+  const targetScaleIm = targetViewHeight / state.height;
+  const scale = targetView.zoom / sourceView.zoom;
+  const offsetX = state.width / 2
+    + (sourceView.centerRe - targetView.centerRe) / targetScaleRe
+    - (state.width / 2) * scale;
+  const offsetY = state.height / 2
+    + (sourceView.centerIm - targetView.centerIm) / targetScaleIm
+    - (state.height / 2) * scale;
+
+  targetContext.save();
+  targetContext.imageSmoothingEnabled = false;
+  targetContext.clearRect(0, 0, state.width, state.height);
+  targetContext.drawImage(sourceCanvas, offsetX, offsetY, state.width * scale, state.height * scale);
+  targetContext.restore();
 }
 
 function loadSavedLogs() {
@@ -415,6 +544,14 @@ function renderFrame(renderId: number) {
   const renderView = { ...state.view };
   let totalSteps = 0;
   let completedChunks = 0;
+  markDebug('render:start', {
+    width: state.width,
+    height: state.height,
+    maxIterations: state.maxIterations,
+    chunkMode: state.chunkMode,
+    previewMode: state.previewMode,
+    zoomMode: state.zoomMode,
+  }, renderId);
 
   const viewWidth = 4 / renderView.zoom;
   const viewHeight = viewWidth * (state.height / state.width);
@@ -442,20 +579,28 @@ function renderFrame(renderId: number) {
 
   const finalizeRender = () => {
     if (renderId !== state.activeRenderId) {
+      markDebug('render:finalize-stale', undefined, renderId);
       return;
     }
 
     drawingContext.putImageData(imageData, 0, 0);
+    cacheCompletedFrame(renderView);
     state.lastRenderMs = performance.now() - start;
     state.lastSteps = totalSteps;
     updateStats();
     updateRenderStatus(false);
     appendRenderLog();
     terminateWorkers();
+    markDebug('render:finish', {
+      completedChunks,
+      totalChunks,
+      ms: Number(state.lastRenderMs.toFixed(2)),
+    }, renderId);
   };
 
   const scheduleTask = (worker: Worker) => {
     if (renderId !== state.activeRenderId) {
+      markDebug('render:schedule-stale', undefined, renderId);
       return;
     }
 
@@ -503,6 +648,9 @@ function renderFrame(renderId: number) {
 
     worker.onmessage = (event: MessageEvent<WorkerResponse>) => {
       if (renderId !== state.activeRenderId) {
+        markDebug('render:tile-stale', {
+          responseRenderId: event.data.renderId,
+        }, renderId);
         return;
       }
 
@@ -522,6 +670,16 @@ function renderFrame(renderId: number) {
       completedChunks += 1;
       activeChunkCount -= 1;
       drawingContext.putImageData(imageData, 0, 0);
+      if (completedChunks === 1 || completedChunks === totalChunks) {
+        markDebug('render:tile-paint', {
+          completedChunks,
+          totalChunks,
+          rowStart: response.rowStart,
+          rowEnd: response.rowEnd,
+          colStart: response.colStart,
+          colEnd: response.colEnd,
+        }, renderId);
+      }
 
       if (completedChunks === totalChunks) {
         finalizeRender();
@@ -533,6 +691,7 @@ function renderFrame(renderId: number) {
 
     worker.onerror = () => {
       if (renderId !== state.activeRenderId) {
+        markDebug('render:error-stale', undefined, renderId);
         return;
       }
       activeChunkCount -= 1;
@@ -545,11 +704,20 @@ function renderFrame(renderId: number) {
 
 function requestRender() {
   state.activeRenderId += 1;
+  markDebug('render:request', {
+    nextRenderId: state.activeRenderId,
+  });
   renderFrame(state.activeRenderId);
 }
 
 function applyZoom(factor: number, screenX: number, screenY: number) {
   const targetView = computeTargetView(factor, screenX, screenY, state.view);
+  markDebug('zoom:instant', {
+    factor: Number(factor.toPrecision(8)),
+    screenX,
+    screenY,
+    targetZoom: Number(targetView.zoom.toPrecision(8)),
+  });
   state.view = targetView;
   requestRender();
 }
@@ -578,8 +746,30 @@ function drawFallbackPreview() {
   drawingContext.putImageData(previousFrame, 0, 0);
 }
 
+function createSmoothPreviewCanvas(from: ViewState) {
+  const previewCanvas = document.createElement('canvas');
+  previewCanvas.width = state.width;
+  previewCanvas.height = state.height;
+  const previewContext = previewCanvas.getContext('2d');
+  if (!previewContext) {
+    return previewCanvas;
+  }
+
+  previewContext.imageSmoothingEnabled = false;
+  if (hasMatchingCompletedFrame()) {
+    drawViewProjection(previewContext, lastCompletedFrame!, lastCompletedView!, from);
+  } else {
+    previewContext.drawImage(canvas, 0, 0, state.width, state.height);
+  }
+
+  return previewCanvas;
+}
+
 function cancelZoomAnimation() {
   if (state.zoomAnimation?.frameId !== null && state.zoomAnimation?.frameId !== undefined) {
+    markDebug('zoom:animation-cancel', {
+      frameId: state.zoomAnimation.frameId,
+    });
     cancelAnimationFrame(state.zoomAnimation.frameId);
   }
   state.zoomAnimation = null;
@@ -593,14 +783,15 @@ function beginSmoothZoom(factor: number, screenX: number, screenY: number) {
   zoomAnimationGeneration = animationToken;
   const from = { ...state.view };
   const to = computeTargetView(factor, screenX, screenY, from);
-  const previewCanvas = document.createElement('canvas');
-  previewCanvas.width = state.width;
-  previewCanvas.height = state.height;
-  const previewContext = previewCanvas.getContext('2d');
-  if (previewContext) {
-    previewContext.imageSmoothingEnabled = false;
-    previewContext.drawImage(canvas, 0, 0, state.width, state.height);
-  }
+  const previewCanvas = createSmoothPreviewCanvas(from);
+  markDebug('zoom:smooth-begin', {
+    factor: Number(factor.toPrecision(8)),
+    screenX,
+    screenY,
+    fromZoom: Number(from.zoom.toPrecision(8)),
+    toZoom: Number(to.zoom.toPrecision(8)),
+    hasCompletedPreview: hasMatchingCompletedFrame(),
+  });
 
   const animation: ZoomAnimationState = {
     from,
@@ -618,7 +809,7 @@ function beginSmoothZoom(factor: number, screenX: number, screenY: number) {
       return;
     }
 
-    const progress = Math.min(1, (currentTime - animation.startTime) / animation.duration);
+    const progress = clampNumber((currentTime - animation.startTime) / animation.duration, 0, 1);
     const eased = 1 - Math.pow(1 - progress, 3);
     const scaleRatio = animation.to.zoom / animation.from.zoom;
     const currentScale = 1 + (scaleRatio - 1) * eased;
@@ -628,6 +819,13 @@ function beginSmoothZoom(factor: number, screenX: number, screenY: number) {
       centerIm: animation.from.centerIm + (animation.to.centerIm - animation.from.centerIm) * eased,
       zoom: animation.from.zoom + (animation.to.zoom - animation.from.zoom) * eased,
     };
+    if (progress === 0 || progress === 1 || progress < 0.08 || progress > 0.92) {
+      markDebug('zoom:smooth-frame', {
+        progress: Number(progress.toFixed(4)),
+        eased: Number(eased.toFixed(4)),
+        currentScale: Number(currentScale.toPrecision(8)),
+      });
+    }
     if (state.previewMode === 'legacy') {
       drawZoomPreview(currentScale, animation.originX, animation.originY, animation.previewCanvas);
     } else {
@@ -640,6 +838,9 @@ function beginSmoothZoom(factor: number, screenX: number, screenY: number) {
       if (zoomAnimationGeneration === animationToken) {
         state.view = animation.to;
         state.zoomAnimation = null;
+        markDebug('zoom:smooth-end', {
+          targetZoom: Number(animation.to.zoom.toPrecision(8)),
+        });
         requestRender();
       }
     }
@@ -701,6 +902,12 @@ function getClickZoomFactor(direction: 'in' | 'out') {
 function handleWheel(event: WheelEvent) {
   event.preventDefault();
   const factor = getWheelZoomFactor(event.deltaY);
+  markDebug('input:wheel', {
+    deltaY: event.deltaY,
+    factor: Number(factor.toPrecision(8)),
+    offsetX: event.offsetX,
+    offsetY: event.offsetY,
+  });
   if (state.zoomMode === 'smooth') {
     beginSmoothZoom(factor, event.offsetX, event.offsetY);
   } else {
@@ -711,6 +918,12 @@ function handleWheel(event: WheelEvent) {
 function handleClick(event: MouseEvent) {
   if (event.button !== 0) {
     const factor = getClickZoomFactor('out');
+    markDebug('input:click-out', {
+      button: event.button,
+      factor: Number(factor.toPrecision(8)),
+      offsetX: event.offsetX,
+      offsetY: event.offsetY,
+    });
     if (state.zoomMode === 'smooth') {
       beginSmoothZoom(factor, event.offsetX, event.offsetY);
     } else {
@@ -720,6 +933,12 @@ function handleClick(event: MouseEvent) {
   }
 
   const factor = getClickZoomFactor('in');
+  markDebug('input:click-in', {
+    button: event.button,
+    factor: Number(factor.toPrecision(8)),
+    offsetX: event.offsetX,
+    offsetY: event.offsetY,
+  });
   if (state.zoomMode === 'smooth') {
     beginSmoothZoom(factor, event.offsetX, event.offsetY);
   } else {
@@ -944,6 +1163,7 @@ function wireControls() {
 }
 
 function init() {
+  installDebugTools();
   loadSavedLogs();
   updateLogStats();
   syncControlValues();
