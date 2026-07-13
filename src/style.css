@@ -161,11 +161,63 @@ label output {
 }
 
 .canvas-panel {
+  position: relative;
   display: flex;
   justify-content: center;
   align-items: center;
   padding: 1rem;
   overflow: hidden;
+}
+
+.canvas-overlay {
+  position: absolute;
+  inset: 1.15rem auto auto 1rem;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.render-status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.35rem 0.6rem;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.8);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow: 0 6px 20px rgba(2, 6, 23, 0.28);
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #f8fafc;
+}
+
+.render-status-dot {
+  width: 0.65rem;
+  height: 0.65rem;
+  border-radius: 50%;
+  display: inline-block;
+  background: #facc15;
+  box-shadow: 0 0 0 2px rgba(250, 204, 21, 0.2);
+  flex-shrink: 0;
+}
+
+.render-status-text,
+.render-status-timer {
+  white-space: nowrap;
+}
+
+.render-status-timer {
+  color: #cbd5e1;
+  font-variant-numeric: tabular-nums;
+}
+
+.render-status-dot.completed {
+  background: #22c55e;
+  box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.2);
+}
+
+.render-status-dot.rendering {
+  background: #facc15;
+  box-shadow: 0 0 0 2px rgba(250, 204, 21, 0.2);
 }
 
 canvas {

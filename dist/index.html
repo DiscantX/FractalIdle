@@ -4,8 +4,8 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Mandelbrot Scratchpad</title>
-    <script type="module" crossorigin src="/assets/index-CwcvxKDK.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-D-jQh3i0.css">
+    <script type="module" crossorigin src="/assets/index-D7EeUhqx.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-Cb3V-bai.css">
   </head>
   <body>
     <div class="app-shell">
@@ -238,6 +238,13 @@
       </aside>
 
       <main class="canvas-panel">
+        <div class="canvas-overlay">
+          <div id="renderStatusBadge" class="render-status-badge" aria-live="polite">
+            <span id="renderStatusDot" class="render-status-dot rendering"></span>
+            <span id="renderStatusText" class="render-status-text">Rendering...</span>
+            <span id="renderStatusTimer" class="render-status-timer">| 0.0 ms</span>
+          </div>
+        </div>
         <canvas id="fractalCanvas"></canvas>
       </main>
     </div>

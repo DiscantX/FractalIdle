@@ -237,6 +237,13 @@
       </aside>
 
       <main class="canvas-panel">
+        <div class="canvas-overlay">
+          <div id="renderStatusBadge" class="render-status-badge" aria-live="polite">
+            <span id="renderStatusDot" class="render-status-dot rendering"></span>
+            <span id="renderStatusText" class="render-status-text">Rendering...</span>
+            <span id="renderStatusTimer" class="render-status-timer">| 0.0 ms</span>
+          </div>
+        </div>
         <canvas id="fractalCanvas"></canvas>
       </main>
     </div>

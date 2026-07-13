@@ -149,6 +149,9 @@ const renderButton = document.querySelector<HTMLButtonElement>('#renderButton')!
 const resetButton = document.querySelector<HTMLButtonElement>('#resetButton')!;
 const exportLogsButton = document.querySelector<HTMLButtonElement>('#exportLogsButton')!;
 const benchmarkButton = document.querySelector<HTMLButtonElement>('#benchmarkButton')!;
+const renderStatusDot = document.querySelector<HTMLElement>('#renderStatusDot')!;
+const renderStatusText = document.querySelector<HTMLElement>('#renderStatusText')!;
+const renderStatusTimer = document.querySelector<HTMLElement>('#renderStatusTimer')!;
 
 const ctx = canvas.getContext('2d');
 
@@ -219,6 +222,46 @@ function updateStats() {
   zoomOutput.textContent = `${state.view.zoom.toFixed(2)}×`;
   activeIterationsOutput.textContent = `${state.maxIterations}`;
   stepOutput.textContent = `${state.lastSteps.toLocaleString()}`;
+}
+
+let renderTimerStart: number | null = null;
+let renderTimerFrame: number | null = null;
+
+function formatRenderTimerValue(value: number) {
+  return `${value.toFixed(1)} ms`;
+}
+
+function stopRenderTimer() {
+  if (renderTimerFrame !== null) {
+    cancelAnimationFrame(renderTimerFrame);
+    renderTimerFrame = null;
+  }
+}
+
+function updateRenderStatus(isRendering: boolean) {
+  renderStatusDot.classList.toggle('completed', !isRendering);
+  renderStatusDot.classList.toggle('rendering', isRendering);
+  renderStatusText.textContent = isRendering ? 'Rendering...' : 'Done';
+
+  if (isRendering) {
+    renderTimerStart = performance.now();
+    const tick = () => {
+      if (renderTimerStart === null) {
+        return;
+      }
+      const elapsed = performance.now() - renderTimerStart;
+      renderStatusTimer.textContent = `| ${formatRenderTimerValue(elapsed)}`;
+      renderTimerFrame = requestAnimationFrame(tick);
+    };
+    stopRenderTimer();
+    renderTimerFrame = requestAnimationFrame(tick);
+  } else {
+    if (renderTimerStart !== null) {
+      const elapsed = performance.now() - renderTimerStart;
+      renderStatusTimer.textContent = `| ${formatRenderTimerValue(elapsed)}`;
+    }
+    stopRenderTimer();
+  }
 }
 
 function syncCanvasSize() {
@@ -356,6 +399,7 @@ function computeTargetView(factor: number, screenX: number, screenY: number, bas
 }
 
 function renderFrame(renderId: number) {
+  updateRenderStatus(true);
   terminateWorkers();
 
   const previousFrame = drawingContext.getImageData(0, 0, state.width, state.height);
@@ -398,6 +442,7 @@ function renderFrame(renderId: number) {
     state.lastRenderMs = performance.now() - start;
     state.lastSteps = totalSteps;
     updateStats();
+    updateRenderStatus(false);
     appendRenderLog();
     terminateWorkers();
   };
@@ -896,6 +941,7 @@ function init() {
   syncControlValues();
   syncCanvasSize();
   updateStats();
+  updateRenderStatus(true);
   wireControls();
   canvas.style.cursor = 'grab';
   requestRender();
