@@ -3,7 +3,7 @@ import { clamp01, lerp } from './math';
 
 export type Rgb = { r: number; g: number; b: number };
 
-export const palettes: Record<PaletteName, Array<[number, number, number]>> = {
+export const palettes: Partial<Record<PaletteName, Array<[number, number, number]>>> = {
   viridis: [[0.0, 0.0, 0.0], [0.2, 0.0, 0.5], [0.4, 0.2, 0.6], [0.6, 0.4, 0.5], [0.8, 0.7, 0.2], [1.0, 0.9, 0.2]],
   plasma: [[0.0, 0.0, 0.0], [0.2, 0.0, 0.5], [0.4, 0.2, 0.7], [0.7, 0.3, 0.7], [0.9, 0.6, 0.3], [1.0, 0.9, 0.1]],
   inferno: [[0.0, 0.0, 0.0], [0.2, 0.0, 0.4], [0.4, 0.2, 0.6], [0.7, 0.4, 0.4], [0.9, 0.7, 0.2], [1.0, 1.0, 0.1]],
@@ -14,6 +14,33 @@ export const palettes: Record<PaletteName, Array<[number, number, number]>> = {
   cool: [[0.0, 0.0, 0.3], [0.3, 0.2, 0.7], [0.6, 0.4, 0.8], [0.8, 0.7, 0.7], [1.0, 0.9, 0.8]],
   warm: [[0.0, 0.1, 0.1], [0.3, 0.4, 0.2], [0.6, 0.7, 0.2], [0.8, 0.8, 0.3], [1.0, 0.95, 0.5]],
   grayscale: [[0.0, 0.0, 0.0], [0.2, 0.2, 0.2], [0.4, 0.4, 0.4], [0.6, 0.6, 0.6], [0.8, 0.8, 0.8], [1.0, 1.0, 1.0]],
+};
+
+export function getWorldMapColor(iteration: number, maxIterations: number): Rgb {
+  if (iteration === maxIterations) {
+    return worldMapColors.continent;
+  }
+
+  const progress = iteration / maxIterations;
+
+  if (progress > 0.85) return worldMapColors.mountainHigh;
+  if (progress > 0.65) return worldMapColors.mountainLow;
+  if (progress > 0.45) return worldMapColors.plains;
+  if (progress > 0.22) return worldMapColors.oceanShallow;
+  if (progress > 0.10) return worldMapColors.oceanMid;
+  if (progress > 0.04) return worldMapColors.oceanDeep;
+  return worldMapColors.oceanTrench;
+}
+
+export const worldMapColors = {
+  continent: { r: 102, g: 157, b: 99 },
+  mountainHigh: { r: 161, g: 105, b: 83 },
+  mountainLow: { r: 196, g: 161, b: 124 },
+  plains: { r: 138, g: 186, b: 131 },
+  oceanShallow: { r: 158, g: 191, b: 223 },
+  oceanMid: { r: 137, g: 172, b: 203 },
+  oceanDeep: { r: 116, g: 152, b: 185 },
+  oceanTrench: { r: 87, g: 124, b: 158 },
 };
 
 export function rgbToHsl(r: number, g: number, b: number) {
@@ -67,7 +94,11 @@ export function getPaletteColor(t: number, palette: PaletteName, reverseColors: 
   const base = clamp01(t);
   const effectiveT = reverseColors ? 1 - base : base;
   const repeated = (effectiveT * colorCycles) % 1;
-  const paletteTable = palettes[palette] ?? palettes.viridis;
+  // Non-null assertion is safe here: 'viridis' is always present in the
+  // `palettes` object literal above. Only the *type* was loosened (to
+  // Partial) to allow 'world-map', which intentionally has no gradient
+  // stops and never reaches this function.
+  const paletteTable = palettes[palette] ?? palettes.viridis!;
   const scaled = repeated * (paletteTable.length - 1);
   const lowIndex = Math.floor(scaled);
   const highIndex = Math.min(paletteTable.length - 1, lowIndex + 1);

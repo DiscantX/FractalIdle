@@ -26,7 +26,7 @@ export type ZoomAnimationState = {
 export type ChunkMode = 'none' | 'rectangles';
 
 export type ColorMode = 'black-white' | 'escape-time' | 'smooth' | 'distance-estimation';
-export type PaletteName = 'viridis' | 'plasma' | 'inferno' | 'magma' | 'turbo' | 'rainbow' | 'cividis' | 'cool' | 'warm' | 'grayscale';
+export type PaletteName = 'viridis' | 'plasma' | 'inferno' | 'magma' | 'turbo' | 'rainbow' | 'cividis' | 'cool' | 'warm' | 'grayscale' | 'world-map';
 export type ColorSpace = 'hsl' | 'hsluv' | 'lch' | 'okhsl';
 
 export type RenderState = {

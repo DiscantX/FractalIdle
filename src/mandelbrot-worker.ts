@@ -1,5 +1,5 @@
 import { WorkerTask, WorkerResponse } from './types';
-import { Rgb, getPaletteColor, applyAdjustments } from './utils/color';
+import { Rgb, getPaletteColor, getWorldMapColor, applyAdjustments } from './utils/color';
 import { clamp01 } from './utils/math';
 
 // Tolerance for declaring two z values "the same" during periodicity
@@ -123,6 +123,8 @@ self.onmessage = (event: MessageEvent<WorkerTask>) => {
       if (payload.colorMode === 'black-white') {
         const gray = iter >= payload.maxIterations ? 0 : 255;
         color = { r: gray, g: gray, b: gray };
+      } else if (payload.palette === 'world-map') {
+        color = getWorldMapColor(iter, payload.maxIterations);
       } else {
         color = getPaletteColor(palettePosition, payload.palette, payload.reverseColors, payload.colorCycles);
       }
@@ -238,6 +240,10 @@ function isTileBorderFullyInSet(payload: WorkerTask): boolean {
 function getSolidInteriorColor(payload: WorkerTask): Rgb {
   if (payload.colorMode === 'black-white') {
     return { r: 0, g: 0, b: 0 };
+  }
+
+  if (payload.palette === 'world-map') {
+    return getWorldMapColor(payload.maxIterations, payload.maxIterations);
   }
 
   const valueForPalette = payload.maxIterations;
