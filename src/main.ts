@@ -4,6 +4,13 @@ type ViewState = {
   zoom: number;
 };
 
+type CompletedFrame = {
+  canvas: HTMLCanvasElement;
+  view: ViewState;
+  width: number;
+  height: number;
+};
+
 type ZoomAnimationState = {
   from: ViewState;
   to: ViewState;
@@ -13,6 +20,7 @@ type ZoomAnimationState = {
   originX: number;
   originY: number;
   previewCanvas: HTMLCanvasElement;
+  previewFrame: CompletedFrame | null;
 };
 
 type ChunkMode = 'none' | 'rectangles';
@@ -186,10 +194,11 @@ const drawingContext = ctx;
 let activeWorkers: Worker[] = [];
 const renderLogs: RenderLogEntry[] = [];
 const STORAGE_KEY = 'mandelbrot-render-logs';
+const PREVIEW_PLACEHOLDER_COLOR = '#0f172a';
+const MAX_COMPLETED_FRAME_CACHE = 24;
 let benchmarkTimer: number | null = null;
 let zoomAnimationGeneration = 0;
-let lastCompletedFrame: HTMLCanvasElement | null = null;
-let lastCompletedView: ViewState | null = null;
+const completedFrames: CompletedFrame[] = [];
 const debugEvents: DebugEvent[] = [];
 
 const state: RenderState = {
@@ -423,15 +432,34 @@ function cacheCompletedFrame(view: ViewState) {
 
   frameContext.imageSmoothingEnabled = false;
   frameContext.drawImage(canvas, 0, 0, state.width, state.height);
-  lastCompletedFrame = frameCanvas;
-  lastCompletedView = { ...view };
+  completedFrames.push({
+    canvas: frameCanvas,
+    view: { ...view },
+    width: state.width,
+    height: state.height,
+  });
+
+  while (completedFrames.length > MAX_COMPLETED_FRAME_CACHE) {
+    completedFrames.shift();
+  }
 }
 
-function hasMatchingCompletedFrame() {
-  return lastCompletedFrame !== null
-    && lastCompletedView !== null
-    && lastCompletedFrame.width === state.width
-    && lastCompletedFrame.height === state.height;
+function getMatchingCompletedFrames() {
+  return completedFrames.filter((frame) => frame.width === state.width && frame.height === state.height);
+}
+
+function findBestPreviewFrame(targetView: ViewState) {
+  const matchingFrames = getMatchingCompletedFrames();
+  if (matchingFrames.length === 0) {
+    return null;
+  }
+
+  const widerFrames = matchingFrames.filter((frame) => frame.view.zoom <= targetView.zoom);
+  if (widerFrames.length > 0) {
+    return widerFrames.reduce((best, frame) => (frame.view.zoom > best.view.zoom ? frame : best));
+  }
+
+  return matchingFrames[matchingFrames.length - 1];
 }
 
 function drawViewProjection(
@@ -454,7 +482,8 @@ function drawViewProjection(
 
   targetContext.save();
   targetContext.imageSmoothingEnabled = false;
-  targetContext.clearRect(0, 0, state.width, state.height);
+  targetContext.fillStyle = PREVIEW_PLACEHOLDER_COLOR;
+  targetContext.fillRect(0, 0, state.width, state.height);
   targetContext.drawImage(sourceCanvas, offsetX, offsetY, state.width * scale, state.height * scale);
   targetContext.restore();
 }
@@ -725,7 +754,8 @@ function applyZoom(factor: number, screenX: number, screenY: number) {
 function drawZoomPreview(scale: number, originX: number, originY: number, previewCanvas: HTMLCanvasElement) {
   drawingContext.save();
   drawingContext.imageSmoothingEnabled = false;
-  drawingContext.clearRect(0, 0, state.width, state.height);
+  drawingContext.fillStyle = PREVIEW_PLACEHOLDER_COLOR;
+  drawingContext.fillRect(0, 0, state.width, state.height);
   drawingContext.translate(originX, originY);
   drawingContext.scale(scale, scale);
   drawingContext.translate(-originX, -originY);
@@ -736,7 +766,7 @@ function drawZoomPreview(scale: number, originX: number, originY: number, previe
 function drawFallbackPreview() {
   if (state.previewMode === 'legacy') {
     drawingContext.save();
-    drawingContext.fillStyle = '#0f172a';
+    drawingContext.fillStyle = PREVIEW_PLACEHOLDER_COLOR;
     drawingContext.fillRect(0, 0, state.width, state.height);
     drawingContext.restore();
     return;
@@ -746,7 +776,7 @@ function drawFallbackPreview() {
   drawingContext.putImageData(previousFrame, 0, 0);
 }
 
-function createSmoothPreviewCanvas(from: ViewState) {
+function createSmoothPreviewCanvas(from: ViewState, previewFrame: CompletedFrame | null) {
   const previewCanvas = document.createElement('canvas');
   previewCanvas.width = state.width;
   previewCanvas.height = state.height;
@@ -756,8 +786,8 @@ function createSmoothPreviewCanvas(from: ViewState) {
   }
 
   previewContext.imageSmoothingEnabled = false;
-  if (hasMatchingCompletedFrame()) {
-    drawViewProjection(previewContext, lastCompletedFrame!, lastCompletedView!, from);
+  if (previewFrame !== null) {
+    drawViewProjection(previewContext, previewFrame.canvas, previewFrame.view, from);
   } else {
     previewContext.drawImage(canvas, 0, 0, state.width, state.height);
   }
@@ -783,14 +813,18 @@ function beginSmoothZoom(factor: number, screenX: number, screenY: number) {
   zoomAnimationGeneration = animationToken;
   const from = { ...state.view };
   const to = computeTargetView(factor, screenX, screenY, from);
-  const previewCanvas = createSmoothPreviewCanvas(from);
+  const isZoomingOut = to.zoom < from.zoom;
+  const previewFrame = isZoomingOut ? findBestPreviewFrame(to) : findBestPreviewFrame(from);
+  const previewCanvas = createSmoothPreviewCanvas(from, previewFrame);
   markDebug('zoom:smooth-begin', {
     factor: Number(factor.toPrecision(8)),
     screenX,
     screenY,
     fromZoom: Number(from.zoom.toPrecision(8)),
     toZoom: Number(to.zoom.toPrecision(8)),
-    hasCompletedPreview: hasMatchingCompletedFrame(),
+    isZoomingOut,
+    previewFrameZoom: previewFrame === null ? null : Number(previewFrame.view.zoom.toPrecision(8)),
+    completedFrameCount: getMatchingCompletedFrames().length,
   });
 
   const animation: ZoomAnimationState = {
@@ -802,6 +836,7 @@ function beginSmoothZoom(factor: number, screenX: number, screenY: number) {
     originX: screenX,
     originY: screenY,
     previewCanvas,
+    previewFrame,
   };
 
   const step = (currentTime: number) => {
@@ -827,7 +862,11 @@ function beginSmoothZoom(factor: number, screenX: number, screenY: number) {
       });
     }
     if (state.previewMode === 'legacy') {
-      drawZoomPreview(currentScale, animation.originX, animation.originY, animation.previewCanvas);
+      if (animation.previewFrame !== null && animation.to.zoom < animation.from.zoom) {
+        drawViewProjection(drawingContext, animation.previewFrame.canvas, animation.previewFrame.view, state.view);
+      } else {
+        drawZoomPreview(currentScale, animation.originX, animation.originY, animation.previewCanvas);
+      }
     } else {
       drawFallbackPreview();
     }
