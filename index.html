@@ -27,7 +27,7 @@
 
           <label class="control-field inline-field">
             <span>Canvas fill</span>
-            <input id="fillViewportInput" type="checkbox" />
+            <input id="fillViewportInput" type="checkbox" checked />
           </label>
         </section>
 
@@ -45,7 +45,7 @@
           <label class="control-field">
             <span>Tile width</span>
             <div class="value-row">
-              <input id="tileWidthInput" type="range" min="8" max="512" step="8" value="64" />
+              <input id="tileWidthInput" type="range" min="8" max="512" step="8" value="400" />
               <input id="tileWidthValueInput" class="value-input" type="number" min="8" max="512" step="8" value="64" />
             </div>
           </label>
@@ -53,7 +53,7 @@
           <label class="control-field">
             <span>Tile height</span>
             <div class="value-row">
-              <input id="tileHeightInput" type="range" min="8" max="512" step="8" value="64" />
+              <input id="tileHeightInput" type="range" min="8" max="512" step="8" value="400" />
               <input id="tileHeightValueInput" class="value-input" type="number" min="8" max="512" step="8" value="64" />
             </div>
           </label>
@@ -61,7 +61,7 @@
           <label class="control-field">
             <span>Worker count</span>
             <div class="value-row">
-              <input id="workerCountInput" type="range" min="1" max="8" step="1" value="4" />
+              <input id="workerCountInput" type="range" min="1" max="8" step="1" value="8" />
               <input id="workerCountValueInput" class="value-input" type="number" min="1" max="8" step="1" value="4" />
             </div>
           </label>
@@ -81,24 +81,24 @@
           <label class="control-field">
             <span>Zoom mode</span>
             <select id="zoomModeInput">
-              <option value="instant">Instant</option>
               <option value="smooth">Smooth</option>
+              <option value="instant">Instant</option>
             </select>
           </label>
 
           <label class="control-field">
             <span>Zoom sensitivity</span>
             <div class="value-row">
-              <input id="zoomSensitivityInput" type="range" min="0.5" max="3" step="0.1" value="1" />
-              <input id="zoomSensitivityValueInput" class="value-input" type="number" min="0.5" max="3" step="0.1" value="1" />
+              <input id="zoomSensitivityInput" type="range" min="0.5" max="5" step="0.1" value="3" />
+              <input id="zoomSensitivityValueInput" class="value-input" type="number" min="0.5" max="5" step="0.1" value="3" />
             </div>
           </label>
 
           <label class="control-field">
             <span>Preview mode</span>
             <select id="previewModeInput">
-              <option value="current">Current</option>
               <option value="legacy">Legacy preview</option>
+              <option value="current">Current</option>
             </select>
           </label>
         </section>
@@ -109,10 +109,10 @@
           <label class="control-field">
             <span>Color mode</span>
             <select id="colorModeInput">
-              <option value="black-white">Black & white</option>
               <option value="escape-time">Escape-time</option>
               <option value="smooth">Smooth</option>
               <option value="distance-estimation">Distance estimation</option>
+              <option value="black-white">Black & white</option>
             </select>
           </label>
 
@@ -170,8 +170,8 @@
           <label class="control-field">
             <span>Palette max iterations</span>
             <div class="value-row">
-              <input id="paletteMaxInput" type="range" min="1" max="2000" step="8" value="256" />
-              <input id="paletteMaxValueInput" class="value-input" type="number" min="1" max="2000" step="8" value="256" />
+              <input id="paletteMaxInput" type="range" min="1" max="2000" step="8" value="199" />
+              <input id="paletteMaxValueInput" class="value-input" type="number" min="1" max="2000" step="8" value="199" />
             </div>
           </label>
         </section>
