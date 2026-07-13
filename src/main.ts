@@ -161,6 +161,7 @@ let activeWorkers: Worker[] = [];
 const renderLogs: RenderLogEntry[] = [];
 const STORAGE_KEY = 'mandelbrot-render-logs';
 let benchmarkTimer: number | null = null;
+let zoomAnimationGeneration = 0;
 
 const state: RenderState = {
   width: Number(widthInput.value),
@@ -530,10 +531,13 @@ function cancelZoomAnimation() {
     cancelAnimationFrame(state.zoomAnimation.frameId);
   }
   state.zoomAnimation = null;
+  zoomAnimationGeneration += 1;
 }
 
 function beginSmoothZoom(factor: number, screenX: number, screenY: number) {
   cancelZoomAnimation();
+  const animationToken = zoomAnimationGeneration + 1;
+  zoomAnimationGeneration = animationToken;
   const from = { ...state.view };
   const to = computeTargetView(factor, screenX, screenY, from);
   const previewCanvas = document.createElement('canvas');
@@ -557,6 +561,10 @@ function beginSmoothZoom(factor: number, screenX: number, screenY: number) {
   };
 
   const step = (currentTime: number) => {
+    if (zoomAnimationGeneration !== animationToken || state.zoomAnimation !== animation) {
+      return;
+    }
+
     const progress = Math.min(1, (currentTime - animation.startTime) / animation.duration);
     const eased = 1 - Math.pow(1 - progress, 3);
     const scaleRatio = animation.to.zoom / animation.from.zoom;
@@ -576,9 +584,11 @@ function beginSmoothZoom(factor: number, screenX: number, screenY: number) {
     if (progress < 1) {
       animation.frameId = requestAnimationFrame(step);
     } else {
-      state.view = animation.to;
-      state.zoomAnimation = null;
-      requestRender();
+      if (zoomAnimationGeneration === animationToken) {
+        state.view = animation.to;
+        state.zoomAnimation = null;
+        requestRender();
+      }
     }
   };
 
