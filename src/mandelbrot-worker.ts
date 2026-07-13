@@ -8,12 +8,34 @@ self.onmessage = (event: MessageEvent<WorkerTask>) => {
   const data = new Uint8ClampedArray(pixelCount * 4);
   let steps = 0;
 
+  const canSolidGuess = payload.solidGuessing
+    && payload.colorMode !== 'distance-estimation'
+    && (payload.colEnd - payload.colStart) > 2
+    && (payload.rowEnd - payload.rowStart) > 2;
+
+  if (canSolidGuess && isTileBorderFullyInSet(payload)) {
+    fillSolidTile(data, getSolidInteriorColor(payload));
+    const response: WorkerResponse = {
+      renderId: payload.renderId,
+      rowStart: payload.rowStart,
+      rowEnd: payload.rowEnd,
+      colStart: payload.colStart,
+      colEnd: payload.colEnd,
+      data,
+      steps: pixelCount * payload.maxIterations,
+      solidGuessed: true,
+    };
+    self.postMessage(response);
+    return;
+  }
+
   const centerRe = payload.centerRe;
   const centerIm = payload.centerIm;
   const scaleRe = payload.scaleRe;
   const scaleIm = payload.scaleIm;
 
-  let offset = 0;
+let offset = 0;
+  let culledPixels = 0;
 
   for (let y = payload.rowStart; y < payload.rowEnd; y += 1) {
     for (let x = payload.colStart; x < payload.colEnd; x += 1) {
@@ -25,16 +47,21 @@ self.onmessage = (event: MessageEvent<WorkerTask>) => {
       let iter = 0;
       let escapeRadiusSquared = 0;
 
-      while (iter < payload.maxIterations && escapeRadiusSquared < 4) {
-        const nextRe = zRe * zRe - zIm * zIm + cRe;
-        const nextIm = 2 * zRe * zIm + cIm;
-        zRe = nextRe;
-        zIm = nextIm;
-        escapeRadiusSquared = zRe * zRe + zIm * zIm;
-        iter += 1;
+      if (payload.geometricCulling && isInMainCardioidOrBulb(cRe, cIm)) {
+        iter = payload.maxIterations;
+        culledPixels += 1;
+      } else {
+        while (iter < payload.maxIterations && escapeRadiusSquared < 4) {
+          const nextRe = zRe * zRe - zIm * zIm + cRe;
+          const nextIm = 2 * zRe * zIm + cIm;
+          zRe = nextRe;
+          zIm = nextIm;
+          escapeRadiusSquared = zRe * zRe + zIm * zIm;
+          iter += 1;
+        }
+        steps += iter;
       }
 
-      steps += iter;
       let valueForPalette: number;
 
       if (payload.colorMode === 'distance-estimation') {
@@ -76,7 +103,7 @@ self.onmessage = (event: MessageEvent<WorkerTask>) => {
     }
   }
 
-  const response: WorkerResponse = {
+const response: WorkerResponse = {
     renderId: payload.renderId,
     rowStart: payload.rowStart,
     rowEnd: payload.rowEnd,
@@ -84,7 +111,104 @@ self.onmessage = (event: MessageEvent<WorkerTask>) => {
     colEnd: payload.colEnd,
     data,
     steps,
+    culledPixels,
   };
+
+// Exact algebraic membership tests for the two largest "always solid"
+// regions of the Mandelbrot set. Not a heuristic like solid-guessing —
+// these are closed-form guarantees, so this is always safe to apply.
+function isInMainCardioidOrBulb(cRe: number, cIm: number): boolean {
+  const shiftedRe = cRe - 0.25;
+  const q = shiftedRe * shiftedRe + cIm * cIm;
+  if (q * (q + shiftedRe) <= 0.25 * cIm * cIm) {
+    return true; // main cardioid
+  }
+
+  const bulbRe = cRe + 1;
+  if (bulbRe * bulbRe + cIm * cIm <= 0.0625) {
+    return true; // period-2 bulb
+  }
+
+  return false;
+}
+
+function escapeIterations(cRe: number, cIm: number, maxIterations: number, geometricCulling: boolean): number {
+  if (geometricCulling && isInMainCardioidOrBulb(cRe, cIm)) {
+    return maxIterations;
+  }
+
+  let zRe = 0;
+  let zIm = 0;
+  let iter = 0;
+  let escapeRadiusSquared = 0;
+
+  while (iter < maxIterations && escapeRadiusSquared < 4) {
+    const nextRe = zRe * zRe - zIm * zIm + cRe;
+    const nextIm = 2 * zRe * zIm + cIm;
+    zRe = nextRe;
+    zIm = nextIm;
+    escapeRadiusSquared = zRe * zRe + zIm * zIm;
+    iter += 1;
+  }
+
+  return iter;
+}
+
+function isPixelInSet(payload: WorkerTask, x: number, y: number): boolean {
+  const cRe = payload.centerRe + (x - payload.width / 2) * payload.scaleRe;
+  const cIm = payload.centerIm + (y - payload.height / 2) * payload.scaleIm;
+  return escapeIterations(cRe, cIm, payload.maxIterations, payload.geometricCulling) === payload.maxIterations;
+}
+
+// Heuristic "solid guessing": if a tile's entire outer perimeter is inside
+// the set, assume the interior is too and skip computing it pixel-by-pixel.
+// Not a mathematical guarantee, but a well-established technique in
+// real-world fractal explorers (Fractint, Kalles Fraktaler, etc.).
+function isTileBorderFullyInSet(payload: WorkerTask): boolean {
+  for (let x = payload.colStart; x < payload.colEnd; x += 1) {
+    if (!isPixelInSet(payload, x, payload.rowStart)) return false;
+    if (!isPixelInSet(payload, x, payload.rowEnd - 1)) return false;
+  }
+
+  for (let y = payload.rowStart; y < payload.rowEnd; y += 1) {
+    if (!isPixelInSet(payload, payload.colStart, y)) return false;
+    if (!isPixelInSet(payload, payload.colEnd - 1, y)) return false;
+  }
+
+  return true;
+}
+
+// Mirrors the "in-set" branch of the main per-pixel color logic below, for
+// the case where iter === maxIterations. Every fully-interior pixel resolves
+// to this same color in escape-time/smooth/black-white modes (smoothing
+// only applies when iter < maxIterations).
+function getSolidInteriorColor(payload: WorkerTask): Rgb {
+  if (payload.colorMode === 'black-white') {
+    return { r: 0, g: 0, b: 0 };
+  }
+
+  const valueForPalette = payload.maxIterations;
+  const minIterations = payload.autoAdjustColors
+    ? 0
+    : Math.min(payload.paletteMinIterations, payload.paletteMaxIterations);
+  const maxIterationsForPalette = payload.autoAdjustColors
+    ? Math.max(1, payload.maxIterations)
+    : Math.max(1, Math.max(payload.paletteMinIterations, payload.paletteMaxIterations));
+  const denom = Math.max(1, maxIterationsForPalette - minIterations);
+  const palettePosition = clamp01((valueForPalette - minIterations) / denom);
+
+  const color = getPaletteColor(palettePosition, payload.palette, payload.reverseColors, payload.colorCycles);
+  return applyAdjustments(color, payload.hueShift, payload.saturation, payload.lightness, payload.colorSpace);
+}
+
+function fillSolidTile(data: Uint8ClampedArray, color: Rgb) {
+  for (let offset = 0; offset < data.length; offset += 4) {
+    data[offset] = color.r;
+    data[offset + 1] = color.g;
+    data[offset + 2] = color.b;
+    data[offset + 3] = 255;
+  }
+}
 
   self.postMessage(response);
 };

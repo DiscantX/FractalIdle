@@ -6,7 +6,7 @@ import { markDebug } from '../utils/debug';
 
 export const zoomCallbacks = {
   onZoomStart: () => {},
-  onZoomChange: () => {},
+  onZoomChange: (_focalX?: number, _focalY?: number) => {},
 };
 
 export function cacheCompletedFrame(view: ViewState) {
@@ -226,14 +226,15 @@ export function beginSmoothZoom(factor: number, screenX: number, screenY: number
         markDebug('zoom:smooth-end', {
           targetZoom: Number(animation.to.zoom.toPrecision(8)),
         });
-        zoomCallbacks.onZoomChange(); // triggers requestRender()
-      }
-    }
+        zoomCallbacks.onZoomChange(animation.originX, animation.originY); // triggers requestRender()      
+      } // <- Closes the inner 'if'
+    } // <- Closes the outer 'else'
   };
 
   animation.frameId = requestAnimationFrame(step);
   state.zoomAnimation = animation;
 }
+
 
 export function applyZoom(factor: number, screenX: number, screenY: number) {
   const targetView = computeTargetView(factor, screenX, screenY, state.view);
@@ -244,7 +245,7 @@ export function applyZoom(factor: number, screenX: number, screenY: number) {
     targetZoom: Number(targetView.zoom.toPrecision(8)),
   });
   state.view = targetView;
-  zoomCallbacks.onZoomChange(); // triggers requestRender()
+  zoomCallbacks.onZoomChange(screenX, screenY); // triggers requestRender()
 }
 
 export function resetView() {

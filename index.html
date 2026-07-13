@@ -46,19 +46,18 @@
         </label>
 
         <label class="control-field">
-          <span>Tile width</span>
+          <span>Grid columns</span>
           <div class="value-row">
-            <input id="tileWidthInput" type="range" min="1" max="2000" step="1" value="320" />
-            <input id="tileWidthValueInput" class="value-input" type="number" min="1" max="2000" step="1" value="320" />
+            <input id="gridColumnsInput" type="range" min="1" max="8" step="1" value="4" />
+            <input id="gridColumnsValueInput" class="value-input" type="number" min="1" max="8" step="1" value="4" />
           </div>
         </label>
 
         <label class="control-field">
-          <span>Tile height</span>
+          <span>Grid rows</span>
           <div class="value-row">
-            <input id="tileHeightInput" type="range" min="1" max="2000" step="1" value="232" />
-            <input id="tileHeightValueInput" class="value-input" type="number" min="1" max="2000" step="1"
-              value="232" />
+            <input id="gridRowsInput" type="range" min="1" max="8" step="1" value="4" />
+            <input id="gridRowsValueInput" class="value-input" type="number" min="1" max="8" step="1" value="4" />
           </div>
         </label>
 
@@ -78,6 +77,16 @@
           </select>
         </label>
       </section>
+
+      <label class="control-field inline-field">
+        <span>Solid interior guessing</span>
+        <input id="solidGuessingInput" type="checkbox" checked />
+      </label>
+
+      <label class="control-field inline-field">
+        <span>Geometric culling</span>
+        <input id="geometricCullingInput" type="checkbox" checked />
+      </label>
 
       <section class="control-section">
         <h2>Zoom</h2>

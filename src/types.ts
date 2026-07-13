@@ -33,10 +33,12 @@ export type RenderState = {
   width: number;
   height: number;
   maxIterations: number;
-  tileWidth: number;
-  tileHeight: number;
+  gridColumns: number;
+  gridRows: number;
   workerCount: number;
   chunkMode: ChunkMode;
+  solidGuessing: boolean;
+  geometricCulling: boolean;
   zoomMode: 'instant' | 'smooth';
   previewMode: 'current' | 'legacy';
   fillViewport: boolean;
@@ -101,6 +103,8 @@ export type WorkerTask = {
   saturation: number;
   lightness: number;
   colorSpace: ColorSpace;
+  solidGuessing: boolean;
+  geometricCulling: boolean;
 };
 
 export type WorkerResponse = {
@@ -111,6 +115,8 @@ export type WorkerResponse = {
   colEnd: number;
   data: Uint8ClampedArray;
   steps: number;
+  solidGuessed?: boolean;
+  culledPixels?: number;
 };
 
 export type RenderLogEntry = {
@@ -119,8 +125,8 @@ export type RenderLogEntry = {
   width: number;
   height: number;
   maxIterations: number;
-  tileWidth: number;
-  tileHeight: number;
+  gridColumns: number;
+  gridRows: number;
   workerCount: number;
   chunkMode: ChunkMode;
   zoomMode: 'instant' | 'smooth';
@@ -134,8 +140,8 @@ export type BenchmarkCase = {
   width: number;
   height: number;
   maxIterations: number;
-  tileWidth: number;
-  tileHeight: number;
+  gridColumns: number;
+  gridRows: number;
   workerCount: number;
   chunkMode: ChunkMode;
   zoomMode: 'instant' | 'smooth';

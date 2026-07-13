@@ -17,13 +17,15 @@ import {
   heightInput,
   iterationsInput,
   iterationsOutput,
-  tileWidthInput,
-  tileWidthOutput,
-  tileHeightInput,
-  tileHeightOutput,
+  gridColumnsInput,
+  gridColumnsOutput,
+  gridRowsInput,
+  gridRowsOutput,
   workerCountInput,
   workerCountOutput,
   chunkModeInput,
+  geometricCullingInput,
+  solidGuessingInput,
   zoomModeInput,
   zoomSensitivityInput,
   zoomSensitivityOutput,
@@ -129,10 +131,12 @@ export function syncControlValues() {
   widthInput.value = String(state.width);
   heightInput.value = String(state.height);
   iterationsInput.value = String(state.maxIterations);
-  tileWidthInput.value = String(state.tileWidth);
-  tileHeightInput.value = String(state.tileHeight);
+  gridColumnsInput.value = String(state.gridColumns);
+  gridRowsInput.value = String(state.gridRows);
   workerCountInput.value = String(state.workerCount);
   chunkModeInput.value = state.chunkMode;
+  solidGuessingInput.checked = state.solidGuessing;
+  geometricCullingInput.checked = state.geometricCulling;
   zoomModeInput.value = state.zoomMode;
   zoomSensitivityInput.value = String(state.zoomSensitivity);
   fillViewportInput.checked = state.fillViewport;
@@ -150,8 +154,8 @@ export function syncControlValues() {
   lightnessInput.value = String(state.lightness);
   colorSpaceInput.value = state.colorSpace;
   iterationsOutput.value = String(state.maxIterations);
-  tileWidthOutput.value = String(state.tileWidth);
-  tileHeightOutput.value = String(state.tileHeight);
+  gridColumnsOutput.value = String(state.gridColumns);
+  gridRowsOutput.value = String(state.gridRows);
   workerCountOutput.value = String(state.workerCount);
   zoomSensitivityOutput.value = state.zoomSensitivity.toFixed(1);
   colorCyclesOutput.value = String(state.colorCycles);
@@ -244,8 +248,8 @@ export function applyBenchmarkCase(testCase: BenchmarkCase) {
   state.width = testCase.width;
   state.height = testCase.height;
   state.maxIterations = testCase.maxIterations;
-  state.tileWidth = testCase.tileWidth;
-  state.tileHeight = testCase.tileHeight;
+  state.gridColumns = testCase.gridColumns;
+  state.gridRows = testCase.gridRows;
   state.workerCount = testCase.workerCount;
   state.chunkMode = testCase.chunkMode;
   state.zoomMode = testCase.zoomMode;
@@ -256,10 +260,10 @@ export function applyBenchmarkCase(testCase: BenchmarkCase) {
 
 export function runBenchmarkSweep() {
   const cases: BenchmarkCase[] = [
-    { label: 'baseline', width: 800, height: 600, maxIterations: 220, tileWidth: 256, tileHeight: 256, workerCount: 4, chunkMode: 'rectangles', zoomMode: 'instant' },
-    { label: 'high-iterations', width: 1000, height: 700, maxIterations: 440, tileWidth: 256, tileHeight: 256, workerCount: 4, chunkMode: 'rectangles', zoomMode: 'instant' },
-    { label: 'no-chunking', width: 1000, height: 700, maxIterations: 440, tileWidth: 512, tileHeight: 512, workerCount: 1, chunkMode: 'none', zoomMode: 'instant' },
-    { label: 'larger-chunks', width: 1250, height: 850, maxIterations: 440, tileWidth: 512, tileHeight: 512, workerCount: 8, chunkMode: 'rectangles', zoomMode: 'instant' },
+    { label: 'baseline', width: 800, height: 600, maxIterations: 220, gridColumns: 4, gridRows: 4, workerCount: 4, chunkMode: 'rectangles', zoomMode: 'instant' },
+    { label: 'high-iterations', width: 1000, height: 700, maxIterations: 440, gridColumns: 4, gridRows: 4, workerCount: 4, chunkMode: 'rectangles', zoomMode: 'instant' },
+    { label: 'no-chunking', width: 1000, height: 700, maxIterations: 440, gridColumns: 1, gridRows: 1, workerCount: 1, chunkMode: 'none', zoomMode: 'instant' },
+    { label: 'larger-chunks', width: 1250, height: 850, maxIterations: 440, gridColumns: 2, gridRows: 2, workerCount: 8, chunkMode: 'rectangles', zoomMode: 'instant' },
   ];
 
   let index = 0;
@@ -305,6 +309,11 @@ export function wireControls() {
     requestRender();
   });
 
+  geometricCullingInput.addEventListener('change', () => {
+    state.geometricCulling = geometricCullingInput.checked;
+    requestRender();
+  });
+
   const syncRangePair = (
     slider: HTMLInputElement,
     valueInput: HTMLInputElement,
@@ -343,12 +352,12 @@ export function wireControls() {
     state.maxIterations = value;
   }, true);
 
-  syncRangePair(tileWidthInput, tileWidthOutput, 1, 2000, (value) => {
-    state.tileWidth = value;
+  syncRangePair(gridColumnsInput, gridColumnsOutput, 1, 8, (value) => {
+    state.gridColumns = value;
   }, true);
 
-  syncRangePair(tileHeightInput, tileHeightOutput, 1, 2000, (value) => {
-    state.tileHeight = value;
+  syncRangePair(gridRowsInput, gridRowsOutput, 1, 8, (value) => {
+    state.gridRows = value;
   }, true);
 
   syncRangePair(workerCountInput, workerCountOutput, 1, 8, (value) => {
@@ -384,6 +393,11 @@ export function wireControls() {
 
   reverseColorsInput.addEventListener('change', () => {
     state.reverseColors = reverseColorsInput.checked;
+    requestRender();
+  });
+
+  solidGuessingInput.addEventListener('change', () => {
+    state.solidGuessing = solidGuessingInput.checked;
     requestRender();
   });
 

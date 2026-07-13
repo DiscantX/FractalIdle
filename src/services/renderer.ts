@@ -26,15 +26,23 @@ export function cancelActiveRender() {
   renderCallbacks.onRenderCancel();
 }
 
-export function requestRender() {
+export function requestRender(focalX?: number, focalY?: number) {
   state.activeRenderId += 1;
   markDebug('render:request', {
     nextRenderId: state.activeRenderId,
   });
-  renderFrame(state.activeRenderId);
+  renderFrame(state.activeRenderId, focalX, focalY);
 }
 
-export function renderFrame(renderId: number) {
+function tileDistanceSquared(tile: TileTask, x: number, y: number) {
+  const centerX = (tile.colStart + tile.colEnd) / 2;
+  const centerY = (tile.rowStart + tile.rowEnd) / 2;
+  const dx = centerX - x;
+  const dy = centerY - y;
+  return dx * dx + dy * dy;
+}
+
+export function renderFrame(renderId: number, focalX?: number, focalY?: number) {
   renderCallbacks.onRenderStart(renderId);
   terminateWorkers();
 
@@ -43,8 +51,12 @@ export function renderFrame(renderId: number) {
   const imageData = new ImageData(new Uint8ClampedArray(previousFrame.data), state.width, state.height);
   const data = imageData.data;
   const renderView = { ...state.view };
+  const focusX = focalX ?? state.width / 2;
+  const focusY = focalY ?? state.height / 2;
   let totalSteps = 0;
   let completedChunks = 0;
+  let solidGuessedChunks = 0;
+  let culledPixels = 0;
   markDebug('render:start', {
     width: state.width,
     height: state.height,
@@ -52,26 +64,50 @@ export function renderFrame(renderId: number) {
     chunkMode: state.chunkMode,
     previewMode: state.previewMode,
     zoomMode: state.zoomMode,
+    focusX: Number(focusX.toFixed(1)),
+    focusY: Number(focusY.toFixed(1)),
   }, renderId);
 
   const viewWidth = 4 / renderView.zoom;
   const viewHeight = viewWidth * (state.height / state.width);
   const scaleRe = viewWidth / state.width;
   const scaleIm = viewHeight / state.height;
-  const chunkWidth = Math.max(1, state.tileWidth);
-  const chunkHeight = Math.max(1, state.tileHeight);
   const queue: TileTask[] = [];
 
-  if (state.chunkMode === 'none') {
-    queue.push({ rowStart: 0, rowEnd: state.height, colStart: 0, colEnd: state.width });
-  } else {
-    for (let rowStart = 0; rowStart < state.height; rowStart += chunkHeight) {
-      const rowEnd = Math.min(rowStart + chunkHeight, state.height);
-      for (let colStart = 0; colStart < state.width; colStart += chunkWidth) {
-        const colEnd = Math.min(colStart + chunkWidth, state.width);
-        queue.push({ rowStart, rowEnd, colStart, colEnd });
+    if (state.chunkMode === 'none') {
+      queue.push({ rowStart: 0, rowEnd: state.height, colStart: 0, colEnd: state.width });
+    } else {
+      const gridColumns = Math.max(1, state.gridColumns);
+      const gridRows = Math.max(1, state.gridRows);
+
+      // Snap to the largest region that divides evenly into the grid, so every
+      // tile is an identical whole-pixel rectangle with zero seam error. Any
+      // leftover pixels on the right/bottom edge (a few px at most) are left
+      // untouched by workers for this render; they retain the previous frame's
+      // pixels since `imageData` was seeded from getImageData() above.
+      const griddedWidth = Math.floor(state.width / gridColumns) * gridColumns;
+      const griddedHeight = Math.floor(state.height / gridRows) * gridRows;
+      const chunkWidth = griddedWidth / gridColumns;
+      const chunkHeight = griddedHeight / gridRows;
+
+      for (let row = 0; row < gridRows; row += 1) {
+        const rowStart = row * chunkHeight;
+        const rowEnd = rowStart + chunkHeight;
+        for (let col = 0; col < gridColumns; col += 1) {
+          const colStart = col * chunkWidth;
+          const colEnd = colStart + chunkWidth;
+          queue.push({ rowStart, rowEnd, colStart, colEnd });
+        }
       }
     }
+    
+  // Prioritize tiles nearest the user's zoom/click focal point (or canvas
+  // center as a sensible default for pan/slider-triggered renders). Because
+  // dispatch is FCFS (scheduleTask() does queue.shift()), sorting the queue
+  // here is sufficient to control dispatch order — no change to worker
+  // scheduling logic is needed.
+  if (queue.length > 1) {
+    queue.sort((a, b) => tileDistanceSquared(a, focusX, focusY) - tileDistanceSquared(b, focusX, focusY));
   }
 
   const totalChunks = queue.length;
@@ -91,6 +127,8 @@ export function renderFrame(renderId: number) {
     markDebug('render:finish', {
       completedChunks,
       totalChunks,
+      solidGuessedChunks,
+      culledPixels,
       ms: Number(state.lastRenderMs.toFixed(2)),
     }, renderId);
 
@@ -126,6 +164,8 @@ export function renderFrame(renderId: number) {
       colEnd: nextTask.colEnd,
       scaleRe,
       scaleIm,
+      solidGuessing: state.solidGuessing,
+      geometricCulling: state.geometricCulling,
       colorMode: state.colorMode,
       palette: state.palette,
       reverseColors: state.reverseColors,
@@ -167,6 +207,11 @@ export function renderFrame(renderId: number) {
 
       totalSteps += response.steps;
       completedChunks += 1;
+      if (response.solidGuessed) {
+        solidGuessedChunks += 1;
+      }
+      culledPixels += response.culledPixels ?? 0;
+
       activeChunkCount -= 1;
       drawingContext.putImageData(imageData, 0, 0);
 

@@ -34,8 +34,8 @@ zoomCallbacks.onZoomStart = () => {
   cancelActiveRender();
 };
 
-zoomCallbacks.onZoomChange = () => {
-  requestRender();
+zoomCallbacks.onZoomChange = (focalX, focalY) => {
+  requestRender(focalX, focalY);
 };
 
 // Link log persistence events to UI counters
