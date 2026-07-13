@@ -184,23 +184,37 @@ self.onmessage = (event: MessageEvent<WorkerTask>) => {
       }
 
       steps += iter;
-      let normalized = iter / payload.maxIterations;
+      // Determine a numeric value to map into the palette range.
+      // `valueForPalette` is expressed in the same units as iterations (0..maxIterations)
+      // for escape-time/smooth modes. Distance-estimation is scaled into that same range
+      // to give a clearly different visual result.
+      let valueForPalette: number;
 
-      if (payload.colorMode === 'smooth' || payload.smoothColoring) {
-        if (iter < payload.maxIterations && escapeRadiusSquared > 0) {
-          const logZn = Math.log(escapeRadiusSquared) / 2;
-          const nu = iter + 1 - Math.log(logZn) / Math.log(2);
-          normalized = nu / payload.maxIterations;
+      if (payload.colorMode === 'distance-estimation') {
+        // Map distance (sqrt(|z|^2)) to a 0..maxIterations range where larger distance
+        // corresponds to earlier escapes. This yields distinct coloring from escape-time.
+        const dist = Math.sqrt(escapeRadiusSquared || 0);
+        // Scale: 1 - 1/(dist+1) gives 0..1 with faster approach to 1 for larger dist
+        const t = clamp01(1 - 1 / (dist + 1));
+        valueForPalette = t * payload.maxIterations;
+      } else {
+        // For escape-time and smooth modes, compute either integer iteration or
+        // continuous smooth iteration (nu) when requested.
+        let baseIter = iter;
+        if ((payload.colorMode === 'smooth') || (payload.smoothColoring && payload.colorMode === 'escape-time')) {
+          if (iter < payload.maxIterations && escapeRadiusSquared > 0) {
+            const logZn = Math.log(escapeRadiusSquared) / 2;
+            const nu = iter + 1 - Math.log(logZn) / Math.log(2);
+            baseIter = nu;
+          }
         }
-      } else if (payload.colorMode === 'distance-estimation') {
-        const distance = Math.sqrt(escapeRadiusSquared);
-        normalized = clamp01(1 - Math.log10(1 + distance) / 2);
+        valueForPalette = baseIter;
       }
 
-      const minIterations = payload.autoAdjustColors ? 0 : payload.paletteMinIterations;
-      const maxIterations = payload.autoAdjustColors ? Math.max(1, payload.maxIterations) : Math.max(1, payload.paletteMaxIterations);
-      const range = Math.max(1, maxIterations - minIterations);
-      const palettePosition = clamp01((normalized * range + minIterations) / Math.max(1, maxIterations));
+      const minIterations = payload.autoAdjustColors ? 0 : Math.min(payload.paletteMinIterations, payload.paletteMaxIterations);
+      const maxIterations = payload.autoAdjustColors ? Math.max(1, payload.maxIterations) : Math.max(1, Math.max(payload.paletteMinIterations, payload.paletteMaxIterations));
+      const denom = Math.max(1, maxIterations - minIterations);
+      const palettePosition = clamp01((valueForPalette - minIterations) / denom);
 
       let color: Rgb;
       if (payload.colorMode === 'black-white') {

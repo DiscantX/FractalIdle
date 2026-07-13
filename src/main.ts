@@ -818,6 +818,29 @@ function wireControls() {
     state.paletteMaxIterations = value;
   }, true);
 
+  // Ensure palette min does not exceed palette max. Keep inputs and sliders synchronized.
+  const ensurePaletteBounds = () => {
+    const minVal = Number(paletteMinOutput.value);
+    const maxVal = Number(paletteMaxOutput.value);
+    if (minVal > maxVal) {
+      // bump max up to min
+      paletteMaxOutput.value = String(minVal);
+      paletteMaxInput.value = String(minVal);
+      state.paletteMaxIterations = minVal;
+    }
+    if (Number(paletteMaxOutput.value) < Number(paletteMinOutput.value)) {
+      // safety: set min to max
+      paletteMinOutput.value = paletteMaxOutput.value;
+      paletteMinInput.value = paletteMaxInput.value;
+      state.paletteMinIterations = Number(paletteMinOutput.value);
+    }
+  };
+
+  paletteMinOutput.addEventListener('change', () => { ensurePaletteBounds(); requestRender(); });
+  paletteMinInput.addEventListener('change', () => { ensurePaletteBounds(); requestRender(); });
+  paletteMaxOutput.addEventListener('change', () => { ensurePaletteBounds(); requestRender(); });
+  paletteMaxInput.addEventListener('change', () => { ensurePaletteBounds(); requestRender(); });
+
   syncRangePair(hueShiftInput, hueShiftOutput, 0, 360, (value) => {
     state.hueShift = value;
   }, true);
