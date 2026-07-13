@@ -343,11 +343,11 @@ export function wireControls() {
     state.maxIterations = value;
   }, true);
 
-  syncRangePair(tileWidthInput, tileWidthOutput, 8, 512, (value) => {
+  syncRangePair(tileWidthInput, tileWidthOutput, 1, 2000, (value) => {
     state.tileWidth = value;
   }, true);
 
-  syncRangePair(tileHeightInput, tileHeightOutput, 8, 512, (value) => {
+  syncRangePair(tileHeightInput, tileHeightOutput, 1, 2000, (value) => {
     state.tileHeight = value;
   }, true);
 
@@ -364,7 +364,7 @@ export function wireControls() {
     state.zoomMode = zoomModeInput.value as 'instant' | 'smooth';
   });
 
-  syncRangePair(zoomSensitivityInput, zoomSensitivityOutput, 0.5, 3, (value) => {
+  syncRangePair(zoomSensitivityInput, zoomSensitivityOutput, 0.01, 5, (value) => {
     state.zoomSensitivity = value;
   }, false);
 

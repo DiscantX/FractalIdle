@@ -197,11 +197,7 @@ export function beginSmoothZoom(factor: number, screenX: number, screenY: number
     const scaleRatio = animation.to.zoom / animation.from.zoom;
     const currentScale = 1 + (scaleRatio - 1) * eased;
 
-    state.view = {
-      centerRe: animation.from.centerRe + (animation.to.centerRe - animation.from.centerRe) * eased,
-      centerIm: animation.from.centerIm + (animation.to.centerIm - animation.from.centerIm) * eased,
-      zoom: animation.from.zoom + (animation.to.zoom - animation.from.zoom) * eased,
-    };
+    state.view = computeTargetView(currentScale, animation.originX, animation.originY, animation.from);
     
     if (progress === 0 || progress === 1 || progress < 0.08 || progress > 0.92) {
       markDebug('zoom:smooth-frame', {
