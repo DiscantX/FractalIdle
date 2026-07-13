@@ -324,6 +324,12 @@ function terminateWorkers() {
   activeWorkers = [];
 }
 
+function cancelActiveRender() {
+  state.activeRenderId += 1;
+  terminateWorkers();
+  updateRenderStatus(false);
+}
+
 function loadSavedLogs() {
   const saved = window.localStorage.getItem(STORAGE_KEY);
   if (!saved) {
@@ -406,10 +412,11 @@ function renderFrame(renderId: number) {
   const start = performance.now();
   const imageData = new ImageData(new Uint8ClampedArray(previousFrame.data), state.width, state.height);
   const data = imageData.data;
+  const renderView = { ...state.view };
   let totalSteps = 0;
   let completedChunks = 0;
 
-  const viewWidth = 4 / state.view.zoom;
+  const viewWidth = 4 / renderView.zoom;
   const viewHeight = viewWidth * (state.height / state.width);
   const scaleRe = viewWidth / state.width;
   const scaleIm = viewHeight / state.height;
@@ -466,9 +473,9 @@ function renderFrame(renderId: number) {
       width: state.width,
       height: state.height,
       maxIterations: state.maxIterations,
-      centerRe: state.view.centerRe,
-      centerIm: state.view.centerIm,
-      zoom: state.view.zoom,
+      centerRe: renderView.centerRe,
+      centerIm: renderView.centerIm,
+      zoom: renderView.zoom,
       rowStart: nextTask.rowStart,
       rowEnd: nextTask.rowEnd,
       colStart: nextTask.colStart,
@@ -581,6 +588,7 @@ function cancelZoomAnimation() {
 
 function beginSmoothZoom(factor: number, screenX: number, screenY: number) {
   cancelZoomAnimation();
+  cancelActiveRender();
   const animationToken = zoomAnimationGeneration + 1;
   zoomAnimationGeneration = animationToken;
   const from = { ...state.view };
