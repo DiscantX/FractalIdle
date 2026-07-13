@@ -12,79 +12,101 @@
         <h1>Mandelbrot Scratchpad</h1>
         <p class="subtitle">Single-threaded proof of concept for canvas performance.</p>
 
-        <label>
-          <span>Canvas width</span>
-          <input id="widthInput" type="number" min="200" max="2000" step="50" value="800" />
-        </label>
+        <section class="control-section">
+          <h2>Canvas</h2>
 
-        <label>
-          <span>Canvas height</span>
-          <input id="heightInput" type="number" min="200" max="2000" step="50" value="600" />
-        </label>
+          <label class="control-field">
+            <span>Canvas width</span>
+            <input id="widthInput" type="number" min="200" max="2000" step="50" value="800" />
+          </label>
 
-        <label>
-          <span>Max iterations</span>
-          <input id="iterationsInput" type="range" min="32" max="2000" step="8" value="256" />
-          <output id="iterationsOutput">256</output>
-        </label>
+          <label class="control-field">
+            <span>Canvas height</span>
+            <input id="heightInput" type="number" min="200" max="2000" step="50" value="600" />
+          </label>
 
-        <label>
-          <span>Tile width</span>
-          <input id="tileWidthInput" type="range" min="8" max="512" step="8" value="64" />
-          <output id="tileWidthOutput">64</output>
-        </label>
+          <label class="control-field inline-field">
+            <span>Canvas fill</span>
+            <input id="fillViewportInput" type="checkbox" />
+          </label>
+        </section>
 
-        <label>
-          <span>Tile height</span>
-          <input id="tileHeightInput" type="range" min="8" max="512" step="8" value="64" />
-          <output id="tileHeightOutput">64</output>
-        </label>
+        <section class="control-section">
+          <h2>Rendering</h2>
 
-        <label>
-          <span>Worker count</span>
-          <input id="workerCountInput" type="range" min="1" max="8" step="1" value="4" />
-          <output id="workerCountOutput">4</output>
-        </label>
+          <label class="control-field">
+            <span>Max iterations</span>
+            <div class="value-row">
+              <input id="iterationsInput" type="range" min="32" max="2000" step="8" value="256" />
+              <input id="iterationsValueInput" class="value-input" type="number" min="32" max="2000" step="8" value="256" />
+            </div>
+          </label>
 
-        <label>
-          <span>Chunk mode</span>
-          <select id="chunkModeInput">
-            <option value="rectangles">Rectangles</option>
-            <option value="none">No chunking</option>
-          </select>
-        </label>
+          <label class="control-field">
+            <span>Tile width</span>
+            <div class="value-row">
+              <input id="tileWidthInput" type="range" min="8" max="512" step="8" value="64" />
+              <input id="tileWidthValueInput" class="value-input" type="number" min="8" max="512" step="8" value="64" />
+            </div>
+          </label>
 
-        <label>
-          <span>Zoom mode</span>
-          <select id="zoomModeInput">
-            <option value="instant">Instant</option>
-            <option value="smooth">Smooth</option>
-          </select>
-        </label>
+          <label class="control-field">
+            <span>Tile height</span>
+            <div class="value-row">
+              <input id="tileHeightInput" type="range" min="8" max="512" step="8" value="64" />
+              <input id="tileHeightValueInput" class="value-input" type="number" min="8" max="512" step="8" value="64" />
+            </div>
+          </label>
 
-        <label>
-          <span>Zoom sensitivity</span>
-          <input id="zoomSensitivityInput" type="range" min="0.5" max="3" step="0.1" value="1" />
-          <output id="zoomSensitivityOutput">1.0</output>
-        </label>
+          <label class="control-field">
+            <span>Worker count</span>
+            <div class="value-row">
+              <input id="workerCountInput" type="range" min="1" max="8" step="1" value="4" />
+              <input id="workerCountValueInput" class="value-input" type="number" min="1" max="8" step="1" value="4" />
+            </div>
+          </label>
 
-        <label>
-          <span>Canvas fill</span>
-          <input id="fillViewportInput" type="checkbox" />
-        </label>
+          <label class="control-field">
+            <span>Chunk mode</span>
+            <select id="chunkModeInput">
+              <option value="rectangles">Rectangles</option>
+              <option value="none">No chunking</option>
+            </select>
+          </label>
+        </section>
 
-        <label>
-          <span>Preview mode</span>
-          <select id="previewModeInput">
-            <option value="current">Current</option>
-            <option value="legacy">Legacy preview</option>
-          </select>
-        </label>
+        <section class="control-section">
+          <h2>Zoom</h2>
 
-        <div class="color-section">
-          <h2>Colors</h2>
+          <label class="control-field">
+            <span>Zoom mode</span>
+            <select id="zoomModeInput">
+              <option value="instant">Instant</option>
+              <option value="smooth">Smooth</option>
+            </select>
+          </label>
 
-          <label>
+          <label class="control-field">
+            <span>Zoom sensitivity</span>
+            <div class="value-row">
+              <input id="zoomSensitivityInput" type="range" min="0.5" max="3" step="0.1" value="1" />
+              <input id="zoomSensitivityValueInput" class="value-input" type="number" min="0.5" max="3" step="0.1" value="1" />
+            </div>
+          </label>
+
+          <label class="control-field">
+            <span>Preview mode</span>
+            <select id="previewModeInput">
+              <option value="current">Current</option>
+              <option value="legacy">Legacy preview</option>
+            </select>
+          </label>
+        </section>
+
+        <section class="control-section">
+          <h2>Color palette</h2>
+
+          <label class="control-field">
             <span>Color mode</span>
             <select id="colorModeInput">
               <option value="black-white">Black & white</option>
@@ -94,7 +116,7 @@
             </select>
           </label>
 
-          <label>
+          <label class="control-field">
             <span>Color palette</span>
             <select id="paletteInput">
               <option value="viridis">Viridis</option>
@@ -110,58 +132,78 @@
             </select>
           </label>
 
-          <label>
+          <label class="control-field">
             <span>Color cycles</span>
-            <input id="colorCyclesInput" type="range" min="1" max="8" step="1" value="1" />
-            <output id="colorCyclesOutput">1</output>
+            <div class="value-row">
+              <input id="colorCyclesInput" type="range" min="1" max="8" step="1" value="1" />
+              <input id="colorCyclesValueInput" class="value-input" type="number" min="1" max="8" step="1" value="1" />
+            </div>
           </label>
 
-          <label>
+          <label class="control-field inline-field">
             <span>Reverse colors</span>
             <input id="reverseColorsInput" type="checkbox" />
           </label>
 
-          <label>
+          <label class="control-field inline-field">
             <span>Smooth coloring</span>
             <input id="smoothColoringInput" type="checkbox" checked />
           </label>
+        </section>
 
-          <label>
+        <section class="control-section">
+          <h2>Palette range</h2>
+
+          <label class="control-field inline-field">
             <span>Auto-adjust palette</span>
             <input id="autoAdjustColorsInput" type="checkbox" checked />
           </label>
 
-          <label>
+          <label class="control-field">
             <span>Palette min iterations</span>
-            <input id="paletteMinInput" type="range" min="0" max="2000" step="8" value="0" />
-            <output id="paletteMinOutput">0</output>
+            <div class="value-row">
+              <input id="paletteMinInput" type="range" min="0" max="2000" step="8" value="0" />
+              <input id="paletteMinValueInput" class="value-input" type="number" min="0" max="2000" step="8" value="0" />
+            </div>
           </label>
 
-          <label>
+          <label class="control-field">
             <span>Palette max iterations</span>
-            <input id="paletteMaxInput" type="range" min="1" max="2000" step="8" value="256" />
-            <output id="paletteMaxOutput">256</output>
+            <div class="value-row">
+              <input id="paletteMaxInput" type="range" min="1" max="2000" step="8" value="256" />
+              <input id="paletteMaxValueInput" class="value-input" type="number" min="1" max="2000" step="8" value="256" />
+            </div>
           </label>
+        </section>
 
-          <label>
+        <section class="control-section">
+          <h2>Adjust colors</h2>
+
+          <label class="control-field">
             <span>Hue shift</span>
-            <input id="hueShiftInput" type="range" min="0" max="360" step="1" value="0" />
-            <output id="hueShiftOutput">0°</output>
+            <div class="value-row">
+              <input id="hueShiftInput" type="range" min="0" max="360" step="1" value="0" />
+              <input id="hueShiftValueInput" class="value-input" type="number" min="0" max="360" step="1" value="0" />
+            </div>
           </label>
 
-          <label>
+          <label class="control-field">
             <span>Saturation</span>
-            <input id="saturationInput" type="range" min="0" max="2" step="0.05" value="1" />
-            <output id="saturationOutput">1.0</output>
+            <div class="value-row">
+              <input id="saturationInput" type="range" min="0" max="2" step="0.05" value="1" />
+              <input id="saturationValueInput" class="value-input" type="number" min="0" max="2" step="0.05" value="1" />
+            </div>
           </label>
 
-          <label>
+          <label class="control-field">
             <span>Lightness</span>
-            <input id="lightnessInput" type="range" min="0" max="2" step="0.05" value="1" />
-            <output id="lightnessOutput">1.0</output>
+            <div class="value-row">
+              <input id="lightnessInput" type="range" min="0" max="2" step="0.05" value="1" />
+              <input id="lightnessValueInput" class="value-input" type="number" min="0" max="2" step="0.05" value="1" />
+            </div>
           </label>
 
-          <label>
+          <label class="control-field">
             <span>Color space</span>
             <select id="colorSpaceInput">
               <option value="hsl">HSL</option>
@@ -170,7 +212,9 @@
               <option value="okhsl">Okhsl</option>
             </select>
           </label>
-        </div>
+        </section>
+
+        <hr class="section-divider" />
 
         <div class="button-row">
           <button id="renderButton" type="button">Render</button>

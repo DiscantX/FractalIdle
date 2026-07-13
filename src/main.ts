@@ -109,37 +109,37 @@ const canvas = document.querySelector<HTMLCanvasElement>('#fractalCanvas')!;
 const widthInput = document.querySelector<HTMLInputElement>('#widthInput')!;
 const heightInput = document.querySelector<HTMLInputElement>('#heightInput')!;
 const iterationsInput = document.querySelector<HTMLInputElement>('#iterationsInput')!;
+const iterationsOutput = document.querySelector<HTMLInputElement>('#iterationsValueInput')!;
 const tileWidthInput = document.querySelector<HTMLInputElement>('#tileWidthInput')!;
+const tileWidthOutput = document.querySelector<HTMLInputElement>('#tileWidthValueInput')!;
 const tileHeightInput = document.querySelector<HTMLInputElement>('#tileHeightInput')!;
+const tileHeightOutput = document.querySelector<HTMLInputElement>('#tileHeightValueInput')!;
 const workerCountInput = document.querySelector<HTMLInputElement>('#workerCountInput')!;
+const workerCountOutput = document.querySelector<HTMLInputElement>('#workerCountValueInput')!;
 const chunkModeInput = document.querySelector<HTMLSelectElement>('#chunkModeInput')!;
 const zoomModeInput = document.querySelector<HTMLSelectElement>('#zoomModeInput')!;
 const zoomSensitivityInput = document.querySelector<HTMLInputElement>('#zoomSensitivityInput')!;
+const zoomSensitivityOutput = document.querySelector<HTMLInputElement>('#zoomSensitivityValueInput')!;
 const fillViewportInput = document.querySelector<HTMLInputElement>('#fillViewportInput')!;
 const previewModeInput = document.querySelector<HTMLSelectElement>('#previewModeInput')!;
 const colorModeInput = document.querySelector<HTMLSelectElement>('#colorModeInput')!;
 const paletteInput = document.querySelector<HTMLSelectElement>('#paletteInput')!;
 const colorCyclesInput = document.querySelector<HTMLInputElement>('#colorCyclesInput')!;
+const colorCyclesOutput = document.querySelector<HTMLInputElement>('#colorCyclesValueInput')!;
 const reverseColorsInput = document.querySelector<HTMLInputElement>('#reverseColorsInput')!;
 const smoothColoringInput = document.querySelector<HTMLInputElement>('#smoothColoringInput')!;
 const autoAdjustColorsInput = document.querySelector<HTMLInputElement>('#autoAdjustColorsInput')!;
 const paletteMinInput = document.querySelector<HTMLInputElement>('#paletteMinInput')!;
+const paletteMinOutput = document.querySelector<HTMLInputElement>('#paletteMinValueInput')!;
 const paletteMaxInput = document.querySelector<HTMLInputElement>('#paletteMaxInput')!;
+const paletteMaxOutput = document.querySelector<HTMLInputElement>('#paletteMaxValueInput')!;
 const hueShiftInput = document.querySelector<HTMLInputElement>('#hueShiftInput')!;
+const hueShiftOutput = document.querySelector<HTMLInputElement>('#hueShiftValueInput')!;
 const saturationInput = document.querySelector<HTMLInputElement>('#saturationInput')!;
+const saturationOutput = document.querySelector<HTMLInputElement>('#saturationValueInput')!;
 const lightnessInput = document.querySelector<HTMLInputElement>('#lightnessInput')!;
+const lightnessOutput = document.querySelector<HTMLInputElement>('#lightnessValueInput')!;
 const colorSpaceInput = document.querySelector<HTMLSelectElement>('#colorSpaceInput')!;
-const iterationsOutput = document.querySelector<HTMLOutputElement>('#iterationsOutput')!;
-const tileWidthOutput = document.querySelector<HTMLOutputElement>('#tileWidthOutput')!;
-const tileHeightOutput = document.querySelector<HTMLOutputElement>('#tileHeightOutput')!;
-const workerCountOutput = document.querySelector<HTMLOutputElement>('#workerCountOutput')!;
-const zoomSensitivityOutput = document.querySelector<HTMLOutputElement>('#zoomSensitivityOutput')!;
-const colorCyclesOutput = document.querySelector<HTMLOutputElement>('#colorCyclesOutput')!;
-const paletteMinOutput = document.querySelector<HTMLOutputElement>('#paletteMinOutput')!;
-const paletteMaxOutput = document.querySelector<HTMLOutputElement>('#paletteMaxOutput')!;
-const hueShiftOutput = document.querySelector<HTMLOutputElement>('#hueShiftOutput')!;
-const saturationOutput = document.querySelector<HTMLOutputElement>('#saturationOutput')!;
-const lightnessOutput = document.querySelector<HTMLOutputElement>('#lightnessOutput')!;
 const logCountOutput = document.querySelector<HTMLElement>('#logCountOutput')!;
 const lastRenderOutput = document.querySelector<HTMLElement>('#lastRenderOutput')!;
 const zoomOutput = document.querySelector<HTMLElement>('#zoomOutput')!;
@@ -209,6 +209,10 @@ function formatMs(value: number) {
   return `${value.toFixed(1)} ms`;
 }
 
+function clampNumber(value: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, value));
+}
+
 function updateStats() {
   lastRenderOutput.textContent = formatMs(state.lastRenderMs);
   zoomOutput.textContent = `${state.view.zoom.toFixed(2)}×`;
@@ -264,7 +268,7 @@ function syncControlValues() {
   colorCyclesOutput.value = String(state.colorCycles);
   paletteMinOutput.value = String(state.paletteMinIterations);
   paletteMaxOutput.value = String(state.paletteMaxIterations);
-  hueShiftOutput.value = `${state.hueShift}°`;
+  hueShiftOutput.value = String(state.hueShift);
   saturationOutput.value = state.saturation.toFixed(2);
   lightnessOutput.value = state.lightness.toFixed(2);
 }
@@ -721,29 +725,48 @@ function wireControls() {
     requestRender();
   });
 
-  iterationsInput.addEventListener('input', () => {
-    state.maxIterations = Number(iterationsInput.value);
-    iterationsOutput.value = String(state.maxIterations);
-    requestRender();
-  });
+  const syncRangePair = (slider: HTMLInputElement, valueInput: HTMLInputElement, min: number, max: number, updateState: (value: number) => void, rerender: boolean) => {
+    const syncFromSlider = () => {
+      const nextValue = clampNumber(Number(slider.value), min, max);
+      slider.value = String(nextValue);
+      valueInput.value = String(nextValue);
+      updateState(nextValue);
+      if (rerender) {
+        requestRender();
+      }
+    };
 
-  tileWidthInput.addEventListener('input', () => {
-    state.tileWidth = Number(tileWidthInput.value);
-    tileWidthOutput.value = String(state.tileWidth);
-    requestRender();
-  });
+    const syncFromValue = () => {
+      const nextValue = clampNumber(Number(valueInput.value), min, max);
+      slider.value = String(nextValue);
+      valueInput.value = String(nextValue);
+      updateState(nextValue);
+      if (rerender) {
+        requestRender();
+      }
+    };
 
-  tileHeightInput.addEventListener('input', () => {
-    state.tileHeight = Number(tileHeightInput.value);
-    tileHeightOutput.value = String(state.tileHeight);
-    requestRender();
-  });
+    slider.addEventListener('input', syncFromSlider);
+    slider.addEventListener('change', syncFromSlider);
+    valueInput.addEventListener('input', syncFromValue);
+    valueInput.addEventListener('change', syncFromValue);
+  };
 
-  workerCountInput.addEventListener('input', () => {
-    state.workerCount = Number(workerCountInput.value);
-    workerCountOutput.value = String(state.workerCount);
-    requestRender();
-  });
+  syncRangePair(iterationsInput, iterationsOutput, 32, 2000, (value) => {
+    state.maxIterations = value;
+  }, true);
+
+  syncRangePair(tileWidthInput, tileWidthOutput, 8, 512, (value) => {
+    state.tileWidth = value;
+  }, true);
+
+  syncRangePair(tileHeightInput, tileHeightOutput, 8, 512, (value) => {
+    state.tileHeight = value;
+  }, true);
+
+  syncRangePair(workerCountInput, workerCountOutput, 1, 8, (value) => {
+    state.workerCount = value;
+  }, true);
 
   chunkModeInput.addEventListener('change', () => {
     state.chunkMode = chunkModeInput.value as ChunkMode;
@@ -754,10 +777,9 @@ function wireControls() {
     state.zoomMode = zoomModeInput.value as 'instant' | 'smooth';
   });
 
-  zoomSensitivityInput.addEventListener('input', () => {
-    state.zoomSensitivity = Number(zoomSensitivityInput.value);
-    zoomSensitivityOutput.value = state.zoomSensitivity.toFixed(1);
-  });
+  syncRangePair(zoomSensitivityInput, zoomSensitivityOutput, 0.5, 3, (value) => {
+    state.zoomSensitivity = value;
+  }, false);
 
   colorModeInput.addEventListener('change', () => {
     state.colorMode = colorModeInput.value as ColorMode;
@@ -769,11 +791,9 @@ function wireControls() {
     requestRender();
   });
 
-  colorCyclesInput.addEventListener('input', () => {
-    state.colorCycles = Number(colorCyclesInput.value);
-    colorCyclesOutput.value = String(state.colorCycles);
-    requestRender();
-  });
+  syncRangePair(colorCyclesInput, colorCyclesOutput, 1, 8, (value) => {
+    state.colorCycles = value;
+  }, true);
 
   reverseColorsInput.addEventListener('change', () => {
     state.reverseColors = reverseColorsInput.checked;
@@ -790,35 +810,25 @@ function wireControls() {
     requestRender();
   });
 
-  paletteMinInput.addEventListener('input', () => {
-    state.paletteMinIterations = Number(paletteMinInput.value);
-    paletteMinOutput.value = String(state.paletteMinIterations);
-    requestRender();
-  });
+  syncRangePair(paletteMinInput, paletteMinOutput, 0, 2000, (value) => {
+    state.paletteMinIterations = value;
+  }, true);
 
-  paletteMaxInput.addEventListener('input', () => {
-    state.paletteMaxIterations = Number(paletteMaxInput.value);
-    paletteMaxOutput.value = String(state.paletteMaxIterations);
-    requestRender();
-  });
+  syncRangePair(paletteMaxInput, paletteMaxOutput, 1, 2000, (value) => {
+    state.paletteMaxIterations = value;
+  }, true);
 
-  hueShiftInput.addEventListener('input', () => {
-    state.hueShift = Number(hueShiftInput.value);
-    hueShiftOutput.value = `${state.hueShift}°`;
-    requestRender();
-  });
+  syncRangePair(hueShiftInput, hueShiftOutput, 0, 360, (value) => {
+    state.hueShift = value;
+  }, true);
 
-  saturationInput.addEventListener('input', () => {
-    state.saturation = Number(saturationInput.value);
-    saturationOutput.value = state.saturation.toFixed(2);
-    requestRender();
-  });
+  syncRangePair(saturationInput, saturationOutput, 0, 2, (value) => {
+    state.saturation = value;
+  }, true);
 
-  lightnessInput.addEventListener('input', () => {
-    state.lightness = Number(lightnessInput.value);
-    lightnessOutput.value = state.lightness.toFixed(2);
-    requestRender();
-  });
+  syncRangePair(lightnessInput, lightnessOutput, 0, 2, (value) => {
+    state.lightness = value;
+  }, true);
 
   colorSpaceInput.addEventListener('change', () => {
     state.colorSpace = colorSpaceInput.value as ColorSpace;
