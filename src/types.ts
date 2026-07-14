@@ -40,6 +40,9 @@ export type RenderState = {
   solidGuessing: boolean;
   geometricCulling: boolean;
   periodicityChecking: boolean;
+  interiorDetail: boolean;
+  interiorNoiseMode: 'single' | 'fractal';
+  interiorNoiseStrength: number;
   zoomMode: 'instant' | 'smooth';
   previewMode: 'current' | 'legacy';
   fillViewport: boolean;
@@ -107,6 +110,9 @@ export type WorkerTask = {
   solidGuessing: boolean;
   geometricCulling: boolean;
   periodicityChecking: boolean;
+  interiorDetail: boolean;
+  interiorNoiseMode: 'single' | 'fractal';
+  interiorNoiseStrength: number;
 };
 
 export type WorkerResponse = {

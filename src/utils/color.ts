@@ -16,9 +16,23 @@ export const palettes: Partial<Record<PaletteName, Array<[number, number, number
   grayscale: [[0.0, 0.0, 0.0], [0.2, 0.2, 0.2], [0.4, 0.4, 0.4], [0.6, 0.6, 0.6], [0.8, 0.8, 0.8], [1.0, 1.0, 1.0]],
 };
 
-export function getWorldMapColor(iteration: number, maxIterations: number): Rgb {
+
+export function getWorldMapColor(iteration: number, maxIterations: number, interiorProgress?: number): Rgb {
   if (iteration === maxIterations) {
-    return worldMapColors.continent;
+    // interiorProgress is only present when the interiorDetail toggle is on
+    // (see mandelbrot-worker.ts). Undefined means either the toggle is off,
+    // or this pixel came from the solid-guessing fast path -- both cases
+    // fall back to the original flat "continent" behavior.
+    if (interiorProgress === undefined) {
+      return worldMapColors.continent;
+    }
+
+// STOPGAP PROXY -- not derived from a true distance value, see the
+    // comment where interiorProgress is computed in mandelbrot-worker.ts
+    // and idle-fractal-game-design.md. Continuously interpolated (rather
+    // than hard-cutoff banded) so the noise perturbation applied in the
+    // worker produces soft gradients instead of banded rings.
+    return interpolateWorldMapStops(interiorProgress);
   }
 
   const progress = iteration / maxIterations;
@@ -33,15 +47,54 @@ export function getWorldMapColor(iteration: number, maxIterations: number): Rgb 
 }
 
 export const worldMapColors = {
-  continent: { r: 102, g: 157, b: 99 },
-  mountainHigh: { r: 161, g: 105, b: 83 },
-  mountainLow: { r: 196, g: 161, b: 124 },
+  // continent: { r: 92, g: 171, b: 114 },
+  mountainPeak: { r: 255, g: 255, b: 255 },
+  mountainTransition: { r: 255, g: 255, b: 255 },
+  mountainHigh: { r: 109, g: 187, b: 123 },
+  mountainLow: { r: 196, g: 196, b: 196 },
   plains: { r: 138, g: 186, b: 131 },
   oceanShallow: { r: 158, g: 191, b: 223 },
   oceanMid: { r: 137, g: 172, b: 203 },
   oceanDeep: { r: 116, g: 152, b: 185 },
   oceanTrench: { r: 87, g: 124, b: 158 },
+  continent: { r: 243, g: 224, b: 166 },
+  contour: { r:214, g:200, b:158 }
 };
+
+const worldMapInteriorStops: Array<[number, Rgb]> = [
+  // [0, worldMapColors.continent],
+  // [0.00001, worldMapColors.plains],
+  // [0.29, worldMapColors.plains],
+  // [0.30, worldMapColors.mountainLow],
+  // // [0.45, worldMapColors.mountainHigh],
+  // [0.70, worldMapColors.mountainTransition],
+  // [0.94, worldMapColors.mountainTransition],
+  // [0.98, worldMapColors.mountainPeak],
+  // [1, worldMapColors.mountainPeak],
+  [0, worldMapColors.continent],
+  [.00001, worldMapColors.continent],
+  [.8, worldMapColors.contour],
+  [.9, worldMapColors.contour],
+  [.9999999, worldMapColors.continent],
+  [1, worldMapColors.continent],
+];
+
+function interpolateWorldMapStops(t: number): Rgb {
+  const clamped = clamp01(t);
+  for (let i = 0; i < worldMapInteriorStops.length - 1; i += 1) {
+    const [t0, c0] = worldMapInteriorStops[i];
+    const [t1, c1] = worldMapInteriorStops[i + 1];
+    if (clamped <= t1) {
+      const localT = t1 === t0 ? 0 : (clamped - t0) / (t1 - t0);
+      return {
+        r: Math.round(lerp(c0.r, c1.r, localT)),
+        g: Math.round(lerp(c0.g, c1.g, localT)),
+        b: Math.round(lerp(c0.b, c1.b, localT)),
+      };
+    }
+  }
+  return worldMapInteriorStops[worldMapInteriorStops.length - 1][1];
+}
 
 export function rgbToHsl(r: number, g: number, b: number) {
   const red = r / 255;

@@ -94,6 +94,34 @@
       </label>
 
       <section class="control-section">
+        <h2>Interior detail</h2>
+
+        <label class="control-field inline-field">
+          <span>Show interior texture</span>
+          <input id="interiorDetailInput" type="checkbox" />
+        </label>
+
+        <label class="control-field">
+          <span>Noise complexity</span>
+          <select id="interiorNoiseModeInput">
+            <option value="single">Single-octave</option>
+            <option value="fractal">Fractal (multi-octave)</option>
+          </select>
+        </label>
+
+        <label class="control-field">
+          <span>Noise strength</span>
+          <div class="value-row">
+            <input id="interiorNoiseStrengthInput" type="range" min="0" max="100" step="0.01" value="0.35" />
+            <input id="interiorNoiseStrengthValueInput" class="value-input" type="number" min="0" max="100" step="0.01"
+              value="0.35" />
+          </div>
+        </label>
+
+        <p class="hint">Estimates elevation inside the set from periodicity-detection speed. Currently a cheap proxy — enabling it disables solid-interior guessing, so affected tiles render slower.</p>
+      </section>
+
+      <section class="control-section">
         <h2>Zoom</h2>
 
         <label class="control-field">

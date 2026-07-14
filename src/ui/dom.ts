@@ -13,7 +13,10 @@ export const chunkModeInput = document.querySelector<HTMLSelectElement>('#chunkM
 export const solidGuessingInput = document.querySelector<HTMLInputElement>('#solidGuessingInput')!;
 export const geometricCullingInput = document.querySelector<HTMLInputElement>('#geometricCullingInput')!;
 export const periodicityCheckingInput = document.querySelector<HTMLInputElement>('#periodicityCheckingInput')!;
-export const zoomModeInput = document.querySelector<HTMLSelectElement>('#zoomModeInput')!;
+export const interiorDetailInput = document.querySelector<HTMLInputElement>('#interiorDetailInput')!;
+export const interiorNoiseModeInput = document.querySelector<HTMLSelectElement>('#interiorNoiseModeInput')!;
+export const interiorNoiseStrengthInput = document.querySelector<HTMLInputElement>('#interiorNoiseStrengthInput')!;
+export const interiorNoiseStrengthOutput = document.querySelector<HTMLInputElement>('#interiorNoiseStrengthValueInput')!;export const zoomModeInput = document.querySelector<HTMLSelectElement>('#zoomModeInput')!;
 export const zoomSensitivityInput = document.querySelector<HTMLInputElement>('#zoomSensitivityInput')!;
 export const zoomSensitivityOutput = document.querySelector<HTMLInputElement>('#zoomSensitivityValueInput')!;
 export const fillViewportInput = document.querySelector<HTMLInputElement>('#fillViewportInput')!;

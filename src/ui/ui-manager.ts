@@ -27,6 +27,10 @@ import {
   geometricCullingInput,
   solidGuessingInput,
   periodicityCheckingInput,
+  interiorDetailInput,
+  interiorNoiseModeInput,
+  interiorNoiseStrengthInput,
+  interiorNoiseStrengthOutput,
   zoomModeInput,
   zoomSensitivityInput,
   zoomSensitivityOutput,
@@ -139,6 +143,9 @@ export function syncControlValues() {
   solidGuessingInput.checked = state.solidGuessing;
   geometricCullingInput.checked = state.geometricCulling;
   periodicityCheckingInput.checked = state.periodicityChecking;
+  interiorDetailInput.checked = state.interiorDetail;
+  interiorNoiseModeInput.value = state.interiorNoiseMode;
+  interiorNoiseStrengthInput.value = String(state.interiorNoiseStrength);
   zoomModeInput.value = state.zoomMode;
   zoomSensitivityInput.value = String(state.zoomSensitivity);
   fillViewportInput.checked = state.fillViewport;
@@ -163,6 +170,7 @@ export function syncControlValues() {
   colorCyclesOutput.value = String(state.colorCycles);
   paletteMinOutput.value = String(state.paletteMinIterations);
   paletteMaxOutput.value = String(state.paletteMaxIterations);
+  interiorNoiseStrengthOutput.value = state.interiorNoiseStrength.toFixed(2);
   hueShiftOutput.value = String(state.hueShift);
   saturationOutput.value = state.saturation.toFixed(2);
   lightnessOutput.value = state.lightness.toFixed(2);
@@ -321,6 +329,22 @@ export function wireControls() {
     requestRender();
   });
 
+  interiorDetailInput.addEventListener('change', () => {
+    state.interiorDetail = interiorDetailInput.checked;
+
+    // The interior-detail proxy reads periodicity-detection data, so it's
+    // meaningless without periodicity checking also enabled. Auto-enable it
+    // rather than leaving interiorDetail as a silent no-op (see plan notes).
+    // We don't force periodicityChecking back off if interiorDetail is later
+    // unchecked — no cost to leaving it on, and it's a pure speed win anyway.
+    if (state.interiorDetail && !state.periodicityChecking) {
+      state.periodicityChecking = true;
+      periodicityCheckingInput.checked = true;
+    }
+
+    requestRender();
+  });
+
   const syncRangePair = (
     slider: HTMLInputElement,
     valueInput: HTMLInputElement,
@@ -369,6 +393,15 @@ export function wireControls() {
 
   syncRangePair(workerCountInput, workerCountOutput, 1, 8, (value) => {
     state.workerCount = value;
+  }, true);
+
+  interiorNoiseModeInput.addEventListener('change', () => {
+    state.interiorNoiseMode = interiorNoiseModeInput.value as 'single' | 'fractal';
+    requestRender();
+  });
+
+  syncRangePair(interiorNoiseStrengthInput, interiorNoiseStrengthOutput, 0, 100, (value) => {
+    state.interiorNoiseStrength = value;
   }, true);
 
   chunkModeInput.addEventListener('change', () => {
