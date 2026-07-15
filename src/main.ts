@@ -1,12 +1,12 @@
-import { state } from './state';
 import { canvas } from './ui/dom';
+import { settingsEngine } from './settings/instance';
 import { requestRender, cancelActiveRender, renderCallbacks } from './services/renderer';
 import { cacheCompletedFrame, zoomCallbacks } from './services/zoom-manager';
 import { loadSavedLogs, appendRenderLog, loggerCallbacks } from './services/logger';
 import { installDebugTools } from './utils/debug';
 import {
   wireControls,
-  syncControlValues,
+  mountSettings,
   syncCanvasSize,
   updateStats,
   updateRenderStatus,
@@ -47,7 +47,7 @@ loggerCallbacks.onLogUpdate = (count) => {
 function init() {
   installDebugTools();
   loadSavedLogs();
-  syncControlValues();
+  mountSettings();
   syncCanvasSize();
   updateStats();
   updateRenderStatus(true);
@@ -57,7 +57,7 @@ function init() {
 }
 
 window.addEventListener('resize', () => {
-  if (state.fillViewport) {
+  if (settingsEngine.getValue('fillViewport') as boolean) {
     syncCanvasSize();
     requestRender();
   }

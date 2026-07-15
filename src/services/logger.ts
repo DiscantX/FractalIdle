@@ -1,5 +1,6 @@
-import { RenderLogEntry } from '../types';
+import { RenderLogEntry, ChunkMode } from '../types';
 import { state, renderContext, STORAGE_KEY } from '../state';
+import { settingsEngine } from '../settings/instance';
 
 export const loggerCallbacks = {
   onLogUpdate: (_count: number) => {},
@@ -28,14 +29,14 @@ export function appendRenderLog(scenario?: string) {
   renderContext.renderLogs.push({
     timestamp: new Date().toISOString(),
     scenario,
-    width: state.width,
-    height: state.height,
-    maxIterations: state.maxIterations,
-    gridColumns: state.gridColumns,
-    gridRows: state.gridRows,
-    workerCount: state.workerCount,
-    chunkMode: state.chunkMode,
-    zoomMode: state.zoomMode,
+    width: settingsEngine.getValue('width') as number,
+    height: settingsEngine.getValue('height') as number,
+    maxIterations: settingsEngine.getValue('maxIterations') as number,
+    gridColumns: settingsEngine.getValue('gridColumns') as number,
+    gridRows: settingsEngine.getValue('gridRows') as number,
+    workerCount: settingsEngine.getValue('workerCount') as number,
+    chunkMode: settingsEngine.getValue('chunkMode') as ChunkMode,
+    zoomMode: settingsEngine.getValue('zoomMode') as 'instant' | 'smooth',
     zoom: state.view.zoom,
     lastRenderMs: state.lastRenderMs,
     lastSteps: state.lastSteps,
@@ -43,7 +44,6 @@ export function appendRenderLog(scenario?: string) {
   saveLogs();
   loggerCallbacks.onLogUpdate(renderContext.renderLogs.length);
 }
-
 export function exportLogs() {
   const blob = new Blob([JSON.stringify(renderContext.renderLogs, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);

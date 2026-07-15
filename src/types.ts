@@ -30,35 +30,6 @@ export type PaletteName = 'viridis' | 'plasma' | 'inferno' | 'magma' | 'turbo' |
 export type ColorSpace = 'hsl' | 'hsluv' | 'lch' | 'okhsl';
 
 export type RenderState = {
-  width: number;
-  height: number;
-  maxIterations: number;
-  gridColumns: number;
-  gridRows: number;
-  workerCount: number;
-  chunkMode: ChunkMode;
-  solidGuessing: boolean;
-  geometricCulling: boolean;
-  periodicityChecking: boolean;
-  interiorDetail: boolean;
-  interiorNoiseMode: 'single' | 'fractal';
-  interiorNoiseStrength: number;
-  zoomMode: 'instant' | 'smooth';
-  previewMode: 'current' | 'legacy';
-  fillViewport: boolean;
-  zoomSensitivity: number;
-  colorMode: ColorMode;
-  palette: PaletteName;
-  reverseColors: boolean;
-  smoothColoring: boolean;
-  colorCycles: number;
-  autoAdjustColors: boolean;
-  paletteMinIterations: number;
-  paletteMaxIterations: number;
-  hueShift: number;
-  saturation: number;
-  lightness: number;
-  colorSpace: ColorSpace;
   view: ViewState;
   zoomAnimation: ZoomAnimationState | null;
   lastRenderMs: number;

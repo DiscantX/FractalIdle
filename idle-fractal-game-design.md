@@ -47,6 +47,7 @@ This is the most load-bearing technical idea in the whole design.
   (derived from the zoom-depth magnitude), without the renderer and
   simulation sharing a number representation.
 - Proposed interface shape for the renderer side (not committed):
+
   ```ts
   interface IFractalNumber {
       add(other: IFractalNumber): IFractalNumber;
@@ -56,6 +57,7 @@ This is the most load-bearing technical idea in the whole design.
       compare(other: IFractalNumber): number;
   }
   ```
+
   with swappable implementations (`DoubleNumber` → `DoubleDoubleNumber` →
   `BigFloatNumber`, etc.) representing precision-tier upgrades.
 
@@ -94,6 +96,7 @@ physically meaningful).
 
 **Resolution — the same fix used elsewhere in this design:** decouple the
 fiction from the implementation once it outgrows physical plausibility.
+
 - Real worker count stays small and roughly hardware-proportional (e.g.
   `min(navigator.hardwareConcurrency, engineCap)`).
 - "Cores owned" as an *economy stat* keeps climbing arbitrarily via
@@ -123,12 +126,14 @@ Also the primary intended **cosmetic monetization surface** (see §14).
 ## 6. Prestige Structure — Multi-Tier
 
 ### 6.1 Zoom is a *level track*, not prestige itself
+
 Reframed from an earlier "zoom = prestige" idea. Zoom depth functions like
 the stage/level counter in a combat idle game — continuous escalating
 progression within a run. Prestige is the *reset action*, triggered by
 hitting a wall, not the level track itself.
 
 ### 6.2 Tier 1 — Zoom Prestige
+
 - Player zooms deeper (level track), buying Compute upgrades along the way.
 - Hits a wall (see §7) at current precision tier.
 - Prestiges: returns to zoom 0, converts depth reached into a permanent
@@ -138,6 +143,7 @@ hitting a wall, not the level track itself.
   wall) rather than an arbitrary "number got big enough" trigger.
 
 ### 6.3 Tier 2 — Ascension candidate: Fractal-family graduation
+
 The existing multi-fractal chapter idea (see §8) naturally sits one level up
 from zoom-prestige: once repeated zoom-prestiges within one fractal family
 stop yielding meaningful gains, graduating to the next family (Mandelbrot →
@@ -145,21 +151,25 @@ Burning Ship → Julia → ...) is a bigger, rarer reset granting broader/longer
 lasting power.
 
 ### 6.4 Tier 3 — Transcendence candidate: Formula swap
+
 Changing the generating formula itself (z²+c → z³+c → z⁵+c, i.e. Multibrot
 sets) is a more fundamental change than switching fractal families — a
 candidate for a third, rarer, even more consequential prestige tier.
 
 ### 6.5 Open questions (explicitly not decided)
+
 - Does Insight (or equivalent) persist across ascension, or does each tier
   have its own separate currency?
 - Do hardware tiers (Clock Speed → ... → Matrioshka Brain) belong to one
   specific prestige layer, or persist as a never-reset track across all tiers?
 
 ### 6.6 Landmark-linked prestige idea (Tier 1 destination select)
+
 At each zoom-prestige (return to zoom 0), the player **chooses a destination**
 from the 12 major zoom-0 landmark *types* (§10) to zoom into for that run —
 directly analogous to Farmers Against Potatoes' class-select-at-prestige
 mechanic (6 classes, each with own tech tree/stats/strengths).
+
 - The 12 types are the right tier for this specifically because they are
   *recurring structural categories* (see §10.2), not one-off coordinates —
   you can't build a repeatable choice out of a single unique discovery point.
@@ -187,6 +197,7 @@ mechanic (6 classes, each with own tech tree/stats/strengths).
 ## 7. The "Wall" — Mechanism and Visual Feedback
 
 ### 7.1 What creates the wall (no hard gates, same as other idle games)
+
 Direct analogy to combat idle games: "your damage is 2.4e3, the boss has
 4.1e12 HP — technically beatable, but it'd take a year." No code-enforced
 barrier; the wall emerges from a ratio going unfavorable.
@@ -207,6 +218,7 @@ barrier; the wall emerges from a ratio going unfavorable.
   hard gate.
 
 ### 7.2 Visual feedback (revised after critique — see §7.3)
+
 Original idea: progressive/tiled rendering (already a good technical fit for
 idle pacing) doubles as the "combat" visual — image sharpens gradually,
 fill-rate driven directly by Compute/sec vs. render cost. Zoom velocity
@@ -222,6 +234,7 @@ upgrades make the in-progress resolve itself more visually interesting, not
 just the final frame.
 
 ### 7.3 Critique and correction: "watching it resolve" is not exciting on its own
+
 **Raised concern:** a smoothly sharpening image is roughly as exciting as
 watching paint dry — valid critique, accepted.
 
@@ -231,6 +244,7 @@ of it (hit numbers, crits, mobs bursting on death). A smooth continuous fade
 has no equivalent punctuation.
 
 **Fix (mechanism unchanged, presentation changed):**
+
 - Tiles should **pop** on completion (snap-in, maybe a hit number/combo
   counter), not gradually fade — same underlying rate, very different feel.
 - The "grinding to a crawl" pace should be **reserved specifically for near
@@ -293,11 +307,13 @@ filler — vague escalation vocabulary with no real mechanic underneath. The
 ## 10. Landmark Discovery — Two Distinct Tiers
 
 ### 10.1 The 12 major zoom-0 features
+
 Main Cardioid, Period-2 Bulb, Seahorse Valley, Antenna, Elephant Valley,
 Secondary Bulbs, Period-3 Bulbs, Spirals & Double-Spirals, Mini-Mandelbrots,
 Filaments, Spokes, Misiurewicz Points.
 
 ### 10.2 Key mathematical fact: these are recurring *types*, not a fixed catalog
+
 The Mandelbrot set is quasi-self-similar: every mini-Mandelbrot (satellite
 copy) found anywhere in the set is surrounded by its own miniature version of
 essentially the whole picture — its own Seahorse Valley, Elephant Valley,
@@ -313,6 +329,7 @@ individually-interesting coordinates deep in the set — an actual ongoing
 practice, not something to invent.
 
 **Resulting two-tier discovery structure:**
+
 - **Procedural/guaranteed layer:** the 12 recurring types, findable
   anywhere, forever — genuinely infinite, no curation needed.
 - **Curated/unique layer:** specific named real coordinates / Misiurewicz
@@ -322,6 +339,7 @@ practice, not something to invent.
   real math rather than being designed on top of it).
 
 ### 10.3 Can this be computed at arbitrary depth? Yes — and here's how
+
 At zoom 0, feature identification is a trivial lookup (store 12 bounding
 regions). At arbitrary depth (e.g. Seahorse Valley of a mini-Mandelbrot of a
 mini-Mandelbrot), there's no finite table — but it's still **computable**,
@@ -360,6 +378,7 @@ not just visually pattern-matched:
   underlying constraint, not two separate problems.
 
 ### 10.4 Discovery UI concept
+
 Minimap-as-search-UI, live render as payoff-view: a stylized, partially-fogged
 overview map shows named/discoverable regions (revealed as found), player
 clicks/travels to a region, the live high-detail render is the arrival payoff.
@@ -367,15 +386,18 @@ Resolves "is discovery live-panning or search-and-resolve" — it's both, split
 across two views.
 
 ### 10.5 Automation
+
 Manual search → assisted search → automated search ("AI" unlocks that find
 landmarks for the player) — a natural, well-tolerated idle-game power curve.
 Also a clean convenience-purchase monetization surface (§14).
 
 ### 10.6 Flavor detail
+
 Named peaks referencing real mathematicians/concepts (Mount Feigenbaum,
 Mount Mandel, Mount Julia) fit the project's self-aware/meta tone.
 
 ### 10.7 Explicitly deferred
+
 The detailed discovery *process* (exact flow of searching, classifying, and
 rewarding a find) still needs to be fleshed out in a future session.
 
@@ -431,6 +453,7 @@ doesn't cleanly match either. Not decided.
 ## 12. Natural Fractals / L-Systems — Side-Loop, Not Merged System
 
 ### 12.1 Why they don't fit the main loop directly
+
 Escape-time fractals (Mandelbrot etc.) are defined by continuous zoom into a
 coordinate plane — infinite, precision-bound. **L-systems** (Lindenmayer
 systems — string-rewriting rules interpreted as turtle-graphics drawing
@@ -443,6 +466,7 @@ different core stat, not a reskin — a structural mismatch with the main loop,
 not just a tonal one.
 
 ### 12.2 Recursion-depth-as-progression, if built as its own loop
+
 - Resource: Compute (or a themed variant) still spent, but on **advancing
   one more rewrite generation** rather than zooming deeper.
 - Cost naturally, honestly steep: the rewrite string genuinely grows
@@ -456,7 +480,9 @@ not just a tonal one.
   search instead of coordinate search).
 
 ### 12.3 Resolution: separate loop, bridged economically
+
 Chosen structural pattern, compared against three real references:
+
 - **Farmers Against Potatoes' potato farm** (chosen model) — a fully
   separate mini-game/loop whose output feeds the main game via an economic
   bridge only; no shared mechanics or UI. Low coupling.
@@ -475,6 +501,7 @@ forcing the two aesthetics to share a screen.
 
 **Bridge mechanism — explicitly deferred, not decided.** Three honest options
 noted, roughly increasing in design cost:
+
 1. Passive trickle (garden idles, feeds a small permanent multiplier to main
    Compute) — lowest cost, risk of feeling like a tacked-on buff.
 2. Discovery-flavored (garden progress unlocks landmark-hunting aids or
@@ -491,6 +518,7 @@ can still appear as just another entry in the coloring/render-style ladder
 ## 13. Monetization — Treated as a Cross-Cutting Design Property
 
 ### 13.1 Platform context
+
 Targeting mobile, web (CrazyGames-style portals), and Steam — genuinely
 different monetization norms per platform (mobile/web: ads + IAP expected;
 Steam: IAP tolerated especially in F2P titles, but ads are not — norm is
@@ -503,12 +531,14 @@ balance stay identical. This is only achievable if nothing in core
 progression *depends* on ads/IAP existing.
 
 ### 13.2 Hard rule
+
 **Core progression power (Compute rate, zoom/precision depth) must stay
 earnable-only — never directly purchasable.** This is a firm "not p2w"
 constraint, explicitly reaffirmed. Protects the "authentic math" identity
 that underlies most of this design's strongest ideas.
 
 ### 13.3 Sanctioned monetization categories
+
 - Temporary boosts
 - Convenience / QOL purchases
 - Cosmetics
@@ -517,6 +547,7 @@ that underlies most of this design's strongest ideas.
   cash-gated. (Not full-blown p2w-adjacent premium-only upgrades.)
 
 ### 13.4 Mapping onto existing systems
+
 - **Coloring/render styles (§5):** primary cosmetic-monetization asset —
   structure as an earnable track (keeps F2P/Steam fairness) plus a separate
   purchasable premium track layered on top; earnable tier must never be

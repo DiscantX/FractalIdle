@@ -1,5 +1,6 @@
-import { BenchmarkCase, ChunkMode, ColorMode, PaletteName, ColorSpace } from '../types';
+import { BenchmarkCase } from '../types';
 import { state, dragState, renderContext } from '../state';
+import { settingsEngine } from '../settings/instance';
 import { requestRender } from '../services/renderer';
 import {
   beginSmoothZoom,
@@ -10,50 +11,9 @@ import {
 } from '../services/zoom-manager';
 import { exportLogs } from '../services/logger';
 import { markDebug } from '../utils/debug';
-import { clamp } from '../utils/math';
 import {
   canvas,
-  widthInput,
-  heightInput,
-  iterationsInput,
-  iterationsOutput,
-  gridColumnsInput,
-  gridColumnsOutput,
-  gridRowsInput,
-  gridRowsOutput,
-  workerCountInput,
-  workerCountOutput,
-  chunkModeInput,
-  geometricCullingInput,
-  solidGuessingInput,
-  periodicityCheckingInput,
-  interiorDetailInput,
-  interiorNoiseModeInput,
-  interiorNoiseStrengthInput,
-  interiorNoiseStrengthOutput,
-  zoomModeInput,
-  zoomSensitivityInput,
-  zoomSensitivityOutput,
-  fillViewportInput,
-  previewModeInput,
-  colorModeInput,
-  paletteInput,
-  colorCyclesInput,
-  colorCyclesOutput,
-  reverseColorsInput,
-  smoothColoringInput,
-  autoAdjustColorsInput,
-  paletteMinInput,
-  paletteMinOutput,
-  paletteMaxInput,
-  paletteMaxOutput,
-  hueShiftInput,
-  hueShiftOutput,
-  saturationInput,
-  saturationOutput,
-  lightnessInput,
-  lightnessOutput,
-  colorSpaceInput,
+  settingsContainer,
   logCountOutput,
   lastRenderOutput,
   zoomOutput,
@@ -68,6 +28,14 @@ import {
   renderStatusTimer,
 } from './dom';
 
+function getWidth(): number {
+  return settingsEngine.getValue('width') as number;
+}
+
+function getHeight(): number {
+  return settingsEngine.getValue('height') as number;
+}
+
 function formatMs(value: number) {
   return `${value.toFixed(1)} ms`;
 }
@@ -75,7 +43,7 @@ function formatMs(value: number) {
 export function updateStats() {
   lastRenderOutput.textContent = formatMs(state.lastRenderMs);
   zoomOutput.textContent = `${state.view.zoom.toFixed(2)}×`;
-  activeIterationsOutput.textContent = `${state.maxIterations}`;
+  activeIterationsOutput.textContent = `${settingsEngine.getValue('maxIterations')}`;
   stepOutput.textContent = `${state.lastSteps.toLocaleString()}`;
 }
 
@@ -117,63 +85,23 @@ export function updateRenderStatus(isRendering: boolean) {
 }
 
 export function syncCanvasSize() {
-  if (state.fillViewport) {
+  if (settingsEngine.getValue('fillViewport') as boolean) {
     const viewportWidth = Math.max(320, window.innerWidth - 340);
     const viewportHeight = Math.max(240, window.innerHeight - 32);
-    state.width = viewportWidth;
-    state.height = viewportHeight;
-    widthInput.value = String(state.width);
-    heightInput.value = String(state.height);
+    settingsEngine.setValue('width', viewportWidth);
+    settingsEngine.setValue('height', viewportHeight);
   }
 
-  canvas.width = state.width;
-  canvas.height = state.height;
-  canvas.style.width = `${state.width}px`;
-  canvas.style.height = `${state.height}px`;
+  const width = getWidth();
+  const height = getHeight();
+  canvas.width = width;
+  canvas.height = height;
+  canvas.style.width = `${width}px`;
+  canvas.style.height = `${height}px`;
 }
 
-export function syncControlValues() {
-  widthInput.value = String(state.width);
-  heightInput.value = String(state.height);
-  iterationsInput.value = String(state.maxIterations);
-  gridColumnsInput.value = String(state.gridColumns);
-  gridRowsInput.value = String(state.gridRows);
-  workerCountInput.value = String(state.workerCount);
-  chunkModeInput.value = state.chunkMode;
-  solidGuessingInput.checked = state.solidGuessing;
-  geometricCullingInput.checked = state.geometricCulling;
-  periodicityCheckingInput.checked = state.periodicityChecking;
-  interiorDetailInput.checked = state.interiorDetail;
-  interiorNoiseModeInput.value = state.interiorNoiseMode;
-  interiorNoiseStrengthInput.value = String(state.interiorNoiseStrength);
-  zoomModeInput.value = state.zoomMode;
-  zoomSensitivityInput.value = String(state.zoomSensitivity);
-  fillViewportInput.checked = state.fillViewport;
-  previewModeInput.value = state.previewMode;
-  colorModeInput.value = state.colorMode;
-  paletteInput.value = state.palette;
-  colorCyclesInput.value = String(state.colorCycles);
-  reverseColorsInput.checked = state.reverseColors;
-  smoothColoringInput.checked = state.smoothColoring;
-  autoAdjustColorsInput.checked = state.autoAdjustColors;
-  paletteMinInput.value = String(state.paletteMinIterations);
-  paletteMaxInput.value = String(state.paletteMaxIterations);
-  hueShiftInput.value = String(state.hueShift);
-  saturationInput.value = String(state.saturation);
-  lightnessInput.value = String(state.lightness);
-  colorSpaceInput.value = state.colorSpace;
-  iterationsOutput.value = String(state.maxIterations);
-  gridColumnsOutput.value = String(state.gridColumns);
-  gridRowsOutput.value = String(state.gridRows);
-  workerCountOutput.value = String(state.workerCount);
-  zoomSensitivityOutput.value = state.zoomSensitivity.toFixed(1);
-  colorCyclesOutput.value = String(state.colorCycles);
-  paletteMinOutput.value = String(state.paletteMinIterations);
-  paletteMaxOutput.value = String(state.paletteMaxIterations);
-  interiorNoiseStrengthOutput.value = state.interiorNoiseStrength.toFixed(2);
-  hueShiftOutput.value = String(state.hueShift);
-  saturationOutput.value = state.saturation.toFixed(2);
-  lightnessOutput.value = state.lightness.toFixed(2);
+export function mountSettings() {
+  settingsEngine.mount(settingsContainer);
 }
 
 export function handlePointerDown(event: MouseEvent) {
@@ -190,12 +118,14 @@ export function handlePointerMove(event: MouseEvent) {
     return;
   }
 
+  const width = getWidth();
+  const height = getHeight();
   const dx = event.clientX - dragState.startX;
   const dy = event.clientY - dragState.startY;
   const viewWidth = 4 / state.view.zoom;
-  const viewHeight = viewWidth * (state.height / state.width);
-  const scaleRe = viewWidth / state.width;
-  const scaleIm = viewHeight / state.height;
+  const viewHeight = viewWidth * (height / width);
+  const scaleRe = viewWidth / width;
+  const scaleIm = viewHeight / height;
 
   state.view.centerRe = dragState.startCenterRe - dx * scaleRe;
   state.view.centerIm = dragState.startCenterIm - dy * scaleIm;
@@ -216,7 +146,7 @@ export function handleWheel(event: WheelEvent) {
     offsetX: event.offsetX,
     offsetY: event.offsetY,
   });
-  if (state.zoomMode === 'smooth') {
+  if ((settingsEngine.getValue('zoomMode') as 'instant' | 'smooth') === 'smooth') {
     beginSmoothZoom(factor, event.offsetX, event.offsetY);
   } else {
     applyZoom(factor, event.offsetX, event.offsetY);
@@ -224,6 +154,8 @@ export function handleWheel(event: WheelEvent) {
 }
 
 export function handleClick(event: MouseEvent) {
+  const zoomMode = settingsEngine.getValue('zoomMode') as 'instant' | 'smooth';
+
   if (event.button !== 0) {
     const factor = getClickZoomFactor('out');
     markDebug('input:click-out', {
@@ -232,7 +164,7 @@ export function handleClick(event: MouseEvent) {
       offsetX: event.offsetX,
       offsetY: event.offsetY,
     });
-    if (state.zoomMode === 'smooth') {
+    if (zoomMode === 'smooth') {
       beginSmoothZoom(factor, event.offsetX, event.offsetY);
     } else {
       applyZoom(factor, event.offsetX, event.offsetY);
@@ -247,7 +179,7 @@ export function handleClick(event: MouseEvent) {
     offsetX: event.offsetX,
     offsetY: event.offsetY,
   });
-  if (state.zoomMode === 'smooth') {
+  if (zoomMode === 'smooth') {
     beginSmoothZoom(factor, event.offsetX, event.offsetY);
   } else {
     applyZoom(factor, event.offsetX, event.offsetY);
@@ -255,15 +187,14 @@ export function handleClick(event: MouseEvent) {
 }
 
 export function applyBenchmarkCase(testCase: BenchmarkCase) {
-  state.width = testCase.width;
-  state.height = testCase.height;
-  state.maxIterations = testCase.maxIterations;
-  state.gridColumns = testCase.gridColumns;
-  state.gridRows = testCase.gridRows;
-  state.workerCount = testCase.workerCount;
-  state.chunkMode = testCase.chunkMode;
-  state.zoomMode = testCase.zoomMode;
-  syncControlValues();
+  settingsEngine.setValue('width', testCase.width);
+  settingsEngine.setValue('height', testCase.height);
+  settingsEngine.setValue('maxIterations', testCase.maxIterations);
+  settingsEngine.setValue('gridColumns', testCase.gridColumns);
+  settingsEngine.setValue('gridRows', testCase.gridRows);
+  settingsEngine.setValue('workerCount', testCase.workerCount);
+  settingsEngine.setValue('chunkMode', testCase.chunkMode);
+  settingsEngine.setValue('zoomMode', testCase.zoomMode);
   syncCanvasSize();
   requestRender();
 }
@@ -301,211 +232,6 @@ export function updateLogCountText(count: number) {
 }
 
 export function wireControls() {
-  widthInput.addEventListener('change', () => {
-    state.width = Math.max(200, Number(widthInput.value));
-    state.fillViewport = false;
-    fillViewportInput.checked = false;
-    widthInput.value = String(state.width);
-    syncCanvasSize();
-    requestRender();
-  });
-
-  heightInput.addEventListener('change', () => {
-    state.height = Math.max(200, Number(heightInput.value));
-    state.fillViewport = false;
-    fillViewportInput.checked = false;
-    heightInput.value = String(state.height);
-    syncCanvasSize();
-    requestRender();
-  });
-
-  geometricCullingInput.addEventListener('change', () => {
-    state.geometricCulling = geometricCullingInput.checked;
-    requestRender();
-  });
-
-  periodicityCheckingInput.addEventListener('change', () => {
-    state.periodicityChecking = periodicityCheckingInput.checked;
-    requestRender();
-  });
-
-  interiorDetailInput.addEventListener('change', () => {
-    state.interiorDetail = interiorDetailInput.checked;
-
-    // The interior-detail proxy reads periodicity-detection data, so it's
-    // meaningless without periodicity checking also enabled. Auto-enable it
-    // rather than leaving interiorDetail as a silent no-op (see plan notes).
-    // We don't force periodicityChecking back off if interiorDetail is later
-    // unchecked — no cost to leaving it on, and it's a pure speed win anyway.
-    if (state.interiorDetail && !state.periodicityChecking) {
-      state.periodicityChecking = true;
-      periodicityCheckingInput.checked = true;
-    }
-
-    requestRender();
-  });
-
-  const syncRangePair = (
-    slider: HTMLInputElement,
-    valueInput: HTMLInputElement,
-    min: number,
-    max: number,
-    updateState: (value: number) => void,
-    rerender: boolean
-  ) => {
-    const syncFromSlider = () => {
-      const nextValue = clamp(Number(slider.value), min, max);
-      slider.value = String(nextValue);
-      valueInput.value = String(nextValue);
-      updateState(nextValue);
-      if (rerender) {
-        requestRender();
-      }
-    };
-
-    const syncFromValue = () => {
-      const nextValue = clamp(Number(valueInput.value), min, max);
-      slider.value = String(nextValue);
-      valueInput.value = String(nextValue);
-      updateState(nextValue);
-      if (rerender) {
-        requestRender();
-      }
-    };
-
-    slider.addEventListener('input', syncFromSlider);
-    slider.addEventListener('change', syncFromSlider);
-    valueInput.addEventListener('input', syncFromValue);
-    valueInput.addEventListener('change', syncFromValue);
-  };
-
-  syncRangePair(iterationsInput, iterationsOutput, 32, 2000, (value) => {
-    state.maxIterations = value;
-  }, true);
-
-  syncRangePair(gridColumnsInput, gridColumnsOutput, 1, 8, (value) => {
-    state.gridColumns = value;
-  }, true);
-
-  syncRangePair(gridRowsInput, gridRowsOutput, 1, 8, (value) => {
-    state.gridRows = value;
-  }, true);
-
-  syncRangePair(workerCountInput, workerCountOutput, 1, 8, (value) => {
-    state.workerCount = value;
-  }, true);
-
-  interiorNoiseModeInput.addEventListener('change', () => {
-    state.interiorNoiseMode = interiorNoiseModeInput.value as 'single' | 'fractal';
-    requestRender();
-  });
-
-  syncRangePair(interiorNoiseStrengthInput, interiorNoiseStrengthOutput, 0, 100, (value) => {
-    state.interiorNoiseStrength = value;
-  }, true);
-
-  chunkModeInput.addEventListener('change', () => {
-    state.chunkMode = chunkModeInput.value as ChunkMode;
-    requestRender();
-  });
-
-  zoomModeInput.addEventListener('change', () => {
-    state.zoomMode = zoomModeInput.value as 'instant' | 'smooth';
-  });
-
-  syncRangePair(zoomSensitivityInput, zoomSensitivityOutput, 0.01, 5, (value) => {
-    state.zoomSensitivity = value;
-  }, false);
-
-  colorModeInput.addEventListener('change', () => {
-    state.colorMode = colorModeInput.value as ColorMode;
-    requestRender();
-  });
-
-  paletteInput.addEventListener('change', () => {
-    state.palette = paletteInput.value as PaletteName;
-    requestRender();
-  });
-
-  syncRangePair(colorCyclesInput, colorCyclesOutput, 1, 8, (value) => {
-    state.colorCycles = value;
-  }, true);
-
-  reverseColorsInput.addEventListener('change', () => {
-    state.reverseColors = reverseColorsInput.checked;
-    requestRender();
-  });
-
-  solidGuessingInput.addEventListener('change', () => {
-    state.solidGuessing = solidGuessingInput.checked;
-    requestRender();
-  });
-
-  smoothColoringInput.addEventListener('change', () => {
-    state.smoothColoring = smoothColoringInput.checked;
-    requestRender();
-  });
-
-  autoAdjustColorsInput.addEventListener('change', () => {
-    state.autoAdjustColors = autoAdjustColorsInput.checked;
-    requestRender();
-  });
-
-  syncRangePair(paletteMinInput, paletteMinOutput, 0, 2000, (value) => {
-    state.paletteMinIterations = value;
-  }, true);
-
-  syncRangePair(paletteMaxInput, paletteMaxOutput, 1, 2000, (value) => {
-    state.paletteMaxIterations = value;
-  }, true);
-
-  const ensurePaletteBounds = () => {
-    const minVal = Number(paletteMinOutput.value);
-    const maxVal = Number(paletteMaxOutput.value);
-    if (minVal > maxVal) {
-      paletteMaxOutput.value = String(minVal);
-      paletteMaxInput.value = String(minVal);
-      state.paletteMaxIterations = minVal;
-    }
-    if (Number(paletteMaxOutput.value) < Number(paletteMinOutput.value)) {
-      paletteMinOutput.value = paletteMaxOutput.value;
-      paletteMinInput.value = paletteMaxInput.value;
-      state.paletteMinIterations = Number(paletteMinOutput.value);
-    }
-  };
-
-  paletteMinOutput.addEventListener('change', () => { ensurePaletteBounds(); requestRender(); });
-  paletteMinInput.addEventListener('change', () => { ensurePaletteBounds(); requestRender(); });
-  paletteMaxOutput.addEventListener('change', () => { ensurePaletteBounds(); requestRender(); });
-  paletteMaxInput.addEventListener('change', () => { ensurePaletteBounds(); requestRender(); });
-
-  syncRangePair(hueShiftInput, hueShiftOutput, 0, 360, (value) => {
-    state.hueShift = value;
-  }, true);
-
-  syncRangePair(saturationInput, saturationOutput, 0, 2, (value) => {
-    state.saturation = value;
-  }, true);
-
-  syncRangePair(lightnessInput, lightnessOutput, 0, 2, (value) => {
-    state.lightness = value;
-  }, true);
-
-  colorSpaceInput.addEventListener('change', () => {
-    state.colorSpace = colorSpaceInput.value as ColorSpace;
-    requestRender();
-  });
-
-  fillViewportInput.addEventListener('change', () => {
-    state.fillViewport = fillViewportInput.checked;
-    syncCanvasSize();
-    requestRender();
-  });
-
-  previewModeInput.addEventListener('change', () => {
-    state.previewMode = previewModeInput.value as 'current' | 'legacy';
-  });
-
   renderButton.addEventListener('click', () => requestRender());
   resetButton.addEventListener('click', () => resetView());
   exportLogsButton.addEventListener('click', () => exportLogs());

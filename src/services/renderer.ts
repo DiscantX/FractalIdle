@@ -1,4 +1,5 @@
-import { ViewState, TileTask, WorkerResponse } from '../types';
+import { ChunkMode, ColorMode, PaletteName, ColorSpace, ViewState, TileTask, WorkerResponse } from '../types';
+import { settingsEngine } from '../settings/instance';
 import { state, renderContext } from '../state';
 import { drawingContext } from '../ui/dom';
 import { markDebug } from '../utils/debug';
@@ -46,13 +47,38 @@ export function renderFrame(renderId: number, focalX?: number, focalY?: number) 
   renderCallbacks.onRenderStart(renderId);
   terminateWorkers();
 
-  const previousFrame = drawingContext.getImageData(0, 0, state.width, state.height);
+  const width = settingsEngine.getValue('width') as number;
+  const height = settingsEngine.getValue('height') as number;
+  const maxIterations = settingsEngine.getValue('maxIterations') as number;
+  const chunkMode = settingsEngine.getValue('chunkMode') as ChunkMode;
+  const previewMode = settingsEngine.getValue('previewMode') as 'current' | 'legacy';
+  const zoomMode = settingsEngine.getValue('zoomMode') as 'instant' | 'smooth';
+  const gridColumns = settingsEngine.getValue('gridColumns') as number;
+  const gridRows = settingsEngine.getValue('gridRows') as number;
+  const workerCountSetting = settingsEngine.getValue('workerCount') as number;
+  const solidGuessing = settingsEngine.getValue('solidGuessing') as boolean;
+  const geometricCulling = settingsEngine.getValue('geometricCulling') as boolean;
+  const periodicityChecking = settingsEngine.getValue('periodicityChecking') as boolean;
+  const colorMode = settingsEngine.getValue('colorMode') as ColorMode;
+  const palette = settingsEngine.getValue('palette') as PaletteName;
+  const reverseColors = settingsEngine.getValue('reverseColors') as boolean;
+  const smoothColoring = settingsEngine.getValue('smoothColoring') as boolean;
+  const colorCycles = settingsEngine.getValue('colorCycles') as number;
+  const autoAdjustColors = settingsEngine.getValue('autoAdjustColors') as boolean;
+  const paletteMinIterations = settingsEngine.getValue('paletteMinIterations') as number;
+  const paletteMaxIterations = settingsEngine.getValue('paletteMaxIterations') as number;
+  const hueShift = settingsEngine.getValue('hueShift') as number;
+  const saturation = settingsEngine.getValue('saturation') as number;
+  const lightness = settingsEngine.getValue('lightness') as number;
+  const colorSpace = settingsEngine.getValue('colorSpace') as ColorSpace;
+
+  const previousFrame = drawingContext.getImageData(0, 0, width, height);
   const start = performance.now();
-  const imageData = new ImageData(new Uint8ClampedArray(previousFrame.data), state.width, state.height);
+  const imageData = new ImageData(new Uint8ClampedArray(previousFrame.data), width, height);
   const data = imageData.data;
   const renderView = { ...state.view };
-  const focusX = focalX ?? state.width / 2;
-  const focusY = focalY ?? state.height / 2;
+  const focusX = focalX ?? width / 2;
+  const focusY = focalY ?? height / 2;
   let totalSteps = 0;
   let completedChunks = 0;
   let solidGuessedChunks = 0;
@@ -60,42 +86,42 @@ export function renderFrame(renderId: number, focalX?: number, focalY?: number) 
   let periodicityShortCircuits = 0;
 
   markDebug('render:start', {
-    width: state.width,
-    height: state.height,
-    maxIterations: state.maxIterations,
-    chunkMode: state.chunkMode,
-    previewMode: state.previewMode,
-    zoomMode: state.zoomMode,
+    width: width,
+    height: height,
+    maxIterations: maxIterations,
+    chunkMode: chunkMode,
+    previewMode: previewMode,
+    zoomMode: zoomMode,
     focusX: Number(focusX.toFixed(1)),
     focusY: Number(focusY.toFixed(1)),
   }, renderId);
 
   const viewWidth = 4 / renderView.zoom;
-  const viewHeight = viewWidth * (state.height / state.width);
-  const scaleRe = viewWidth / state.width;
-  const scaleIm = viewHeight / state.height;
+  const viewHeight = viewWidth * (height / width);
+  const scaleRe = viewWidth / width;
+  const scaleIm = viewHeight / height;
   const queue: TileTask[] = [];
 
-    if (state.chunkMode === 'none') {
-      queue.push({ rowStart: 0, rowEnd: state.height, colStart: 0, colEnd: state.width });
+    if (chunkMode === 'none') {
+      queue.push({ rowStart: 0, rowEnd: height, colStart: 0, colEnd: width });
     } else {
-      const gridColumns = Math.max(1, state.gridColumns);
-      const gridRows = Math.max(1, state.gridRows);
+      const columns = Math.max(1, gridColumns);
+      const rows = Math.max(1, gridRows);
 
       // Snap to the largest region that divides evenly into the grid, so every
       // tile is an identical whole-pixel rectangle with zero seam error. Any
       // leftover pixels on the right/bottom edge (a few px at most) are left
       // untouched by workers for this render; they retain the previous frame's
       // pixels since `imageData` was seeded from getImageData() above.
-      const griddedWidth = Math.floor(state.width / gridColumns) * gridColumns;
-      const griddedHeight = Math.floor(state.height / gridRows) * gridRows;
-      const chunkWidth = griddedWidth / gridColumns;
-      const chunkHeight = griddedHeight / gridRows;
+      const griddedWidth = Math.floor(width / columns) * columns;
+      const griddedHeight = Math.floor(height / rows) * rows;
+      const chunkWidth = griddedWidth / columns;
+      const chunkHeight = griddedHeight / rows;
 
-      for (let row = 0; row < gridRows; row += 1) {
+      for (let row = 0; row < rows; row += 1) {
         const rowStart = row * chunkHeight;
         const rowEnd = rowStart + chunkHeight;
-        for (let col = 0; col < gridColumns; col += 1) {
+        for (let col = 0; col < columns; col += 1) {
           const colStart = col * chunkWidth;
           const colEnd = colStart + chunkWidth;
           queue.push({ rowStart, rowEnd, colStart, colEnd });
@@ -113,7 +139,7 @@ export function renderFrame(renderId: number, focalX?: number, focalY?: number) 
   }
 
   const totalChunks = queue.length;
-  const workerCount = state.chunkMode === 'none' ? 1 : Math.max(1, Math.min(8, state.workerCount));
+  const workerCount = chunkMode === 'none' ? 1 : Math.max(1, Math.min(8, workerCountSetting));
   let activeChunkCount = 0;
 
   const finalizeRender = () => {
@@ -155,9 +181,9 @@ export function renderFrame(renderId: number, focalX?: number, focalY?: number) 
     activeChunkCount += 1;
     worker.postMessage({
       renderId,
-      width: state.width,
-      height: state.height,
-      maxIterations: state.maxIterations,
+      width: width,
+      height: height,
+      maxIterations: maxIterations,
       centerRe: renderView.centerRe,
       centerIm: renderView.centerIm,
       zoom: renderView.zoom,
@@ -167,23 +193,27 @@ export function renderFrame(renderId: number, focalX?: number, focalY?: number) 
       colEnd: nextTask.colEnd,
       scaleRe,
       scaleIm,
-      solidGuessing: state.solidGuessing,
-      geometricCulling: state.geometricCulling,
-      periodicityChecking: state.periodicityChecking,
-      interiorDetail: state.interiorDetail,
-      interiorNoiseMode: state.interiorNoiseMode,
-      interiorNoiseStrength: state.interiorNoiseStrength,      colorMode: state.colorMode,
-      palette: state.palette,
-      reverseColors: state.reverseColors,
-      smoothColoring: state.smoothColoring,
-      colorCycles: state.colorCycles,
-      autoAdjustColors: state.autoAdjustColors,
-      paletteMinIterations: state.paletteMinIterations,
-      paletteMaxIterations: state.paletteMaxIterations,
-      hueShift: state.hueShift,
-      saturation: state.saturation,
-      lightness: state.lightness,
-      colorSpace: state.colorSpace,
+      solidGuessing: solidGuessing,
+      geometricCulling: geometricCulling,
+      periodicityChecking: periodicityChecking,
+      // TODO(Slice 5 - palette plugins): interior-detail settings belong to
+      // the world-map palette, not core settings. Hardcoded to "off" until
+      // they're re-homed as palette-owned settings.
+      interiorDetail: false,
+      interiorNoiseMode: 'single',
+      interiorNoiseStrength: 0,
+      colorMode: colorMode,
+      palette: palette,
+      reverseColors: reverseColors,
+      smoothColoring: smoothColoring,
+      colorCycles: colorCycles,
+      autoAdjustColors: autoAdjustColors,
+      paletteMinIterations: paletteMinIterations,
+      paletteMaxIterations: paletteMaxIterations,
+      hueShift: hueShift,
+      saturation: saturation,
+      lightness: lightness,
+      colorSpace: colorSpace,
     });
   };
 
@@ -204,7 +234,7 @@ export function renderFrame(renderId: number, focalX?: number, focalY?: number) 
       let sourceOffset = 0;
 
       for (let y = response.rowStart; y < response.rowEnd; y += 1) {
-        const rowOffset = (y * state.width + response.colStart) * 4;
+        const rowOffset = (y * width + response.colStart) * 4;
         for (let x = 0; x < rectangleWidth; x += 1) {
           data.set(response.data.subarray(sourceOffset, sourceOffset + 4), rowOffset + x * 4);
           sourceOffset += 4;

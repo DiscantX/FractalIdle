@@ -3,6 +3,20 @@ import { state, renderContext, PREVIEW_PLACEHOLDER_COLOR, MAX_COMPLETED_FRAME_CA
 import { canvas, drawingContext } from '../ui/dom';
 import { clamp } from '../utils/math';
 import { markDebug } from '../utils/debug';
+import { settingsEngine } from '../settings/instance';
+
+function getWidth(): number {
+  return settingsEngine.getValue('width') as number;
+}
+
+function getHeight(): number {
+  return settingsEngine.getValue('height') as number;
+}
+
+function getZoomSensitivity(): number {
+  return settingsEngine.getValue('zoomSensitivity') as number;
+}
+
 
 export const zoomCallbacks = {
   onZoomStart: () => {},
@@ -10,21 +24,24 @@ export const zoomCallbacks = {
 };
 
 export function cacheCompletedFrame(view: ViewState) {
+  const width = getWidth();
+  const height = getHeight();
+
   const frameCanvas = document.createElement('canvas');
-  frameCanvas.width = state.width;
-  frameCanvas.height = state.height;
+  frameCanvas.width = width;
+  frameCanvas.height = height;
   const frameContext = frameCanvas.getContext('2d');
   if (!frameContext) {
     return;
   }
 
   frameContext.imageSmoothingEnabled = false;
-  frameContext.drawImage(canvas, 0, 0, state.width, state.height);
+  frameContext.drawImage(canvas, 0, 0, width, height);
   renderContext.completedFrames.push({
     canvas: frameCanvas,
     view: { ...view },
-    width: state.width,
-    height: state.height,
+    width,
+    height,
   });
 
   while (renderContext.completedFrames.length > MAX_COMPLETED_FRAME_CACHE) {
@@ -33,7 +50,9 @@ export function cacheCompletedFrame(view: ViewState) {
 }
 
 export function getMatchingCompletedFrames() {
-  return renderContext.completedFrames.filter((frame) => frame.width === state.width && frame.height === state.height);
+  const width = getWidth();
+  const height = getHeight();
+  return renderContext.completedFrames.filter((frame) => frame.width === width && frame.height === height);
 }
 
 export function findBestPreviewFrame(targetView: ViewState) {
@@ -56,55 +75,65 @@ export function drawViewProjection(
   sourceView: ViewState,
   targetView: ViewState
 ) {
+  const width = getWidth();
+  const height = getHeight();
   const targetViewWidth = 4 / targetView.zoom;
-  const targetViewHeight = targetViewWidth * (state.height / state.width);
-  const targetScaleRe = targetViewWidth / state.width;
-  const targetScaleIm = targetViewHeight / state.height;
+  const targetViewHeight = targetViewWidth * (height / width);
+  const targetScaleRe = targetViewWidth / width;
+  const targetScaleIm = targetViewHeight / height;
   const scale = targetView.zoom / sourceView.zoom;
-  const offsetX = state.width / 2
+  const offsetX = width / 2
     + (sourceView.centerRe - targetView.centerRe) / targetScaleRe
-    - (state.width / 2) * scale;
-  const offsetY = state.height / 2
+    - (width / 2) * scale;
+  const offsetY = height / 2
     + (sourceView.centerIm - targetView.centerIm) / targetScaleIm
-    - (state.height / 2) * scale;
+    - (height / 2) * scale;
 
   targetContext.save();
   targetContext.imageSmoothingEnabled = false;
   targetContext.fillStyle = PREVIEW_PLACEHOLDER_COLOR;
-  targetContext.fillRect(0, 0, state.width, state.height);
-  targetContext.drawImage(sourceCanvas, offsetX, offsetY, state.width * scale, state.height * scale);
+  targetContext.fillRect(0, 0, width, height);
+  targetContext.drawImage(sourceCanvas, offsetX, offsetY, width * scale, height * scale);
   targetContext.restore();
 }
 
 export function drawZoomPreview(scale: number, originX: number, originY: number, previewCanvas: HTMLCanvasElement) {
+  const width = getWidth();
+  const height = getHeight();
   drawingContext.save();
   drawingContext.imageSmoothingEnabled = false;
   drawingContext.fillStyle = PREVIEW_PLACEHOLDER_COLOR;
-  drawingContext.fillRect(0, 0, state.width, state.height);
+  drawingContext.fillRect(0, 0, width, height);
   drawingContext.translate(originX, originY);
   drawingContext.scale(scale, scale);
   drawingContext.translate(-originX, -originY);
-  drawingContext.drawImage(previewCanvas, 0, 0, state.width, state.height);
+  drawingContext.drawImage(previewCanvas, 0, 0, width, height);
   drawingContext.restore();
 }
 
 export function drawFallbackPreview() {
-  if (state.previewMode === 'legacy') {
+  const width = getWidth();
+  const height = getHeight();
+
+  if ((settingsEngine.getValue('previewMode') as 'current' | 'legacy') === 'legacy') {
     drawingContext.save();
     drawingContext.fillStyle = PREVIEW_PLACEHOLDER_COLOR;
-    drawingContext.fillRect(0, 0, state.width, state.height);
+    drawingContext.fillRect(0, 0, width, height);
     drawingContext.restore();
     return;
   }
 
-  const previousFrame = drawingContext.getImageData(0, 0, state.width, state.height);
+  const previousFrame = drawingContext.getImageData(0, 0, width, height);
   drawingContext.putImageData(previousFrame, 0, 0);
 }
 
 export function createSmoothPreviewCanvas(from: ViewState, previewFrame: CompletedFrame | null) {
+  const width = getWidth();
+  const height = getHeight();
+
   const previewCanvas = document.createElement('canvas');
-  previewCanvas.width = state.width;
-  previewCanvas.height = state.height;
+  previewCanvas.width = width;
+  previewCanvas.height = height;
   const previewContext = previewCanvas.getContext('2d');
   if (!previewContext) {
     return previewCanvas;
@@ -114,7 +143,7 @@ export function createSmoothPreviewCanvas(from: ViewState, previewFrame: Complet
   if (previewFrame !== null) {
     drawViewProjection(previewContext, previewFrame.canvas, previewFrame.view, from);
   } else {
-    previewContext.drawImage(canvas, 0, 0, state.width, state.height);
+    previewContext.drawImage(canvas, 0, 0, width, height);
   }
 
   return previewCanvas;
@@ -132,23 +161,26 @@ export function cancelZoomAnimation() {
 }
 
 export function computeTargetView(factor: number, screenX: number, screenY: number, baseView: ViewState): ViewState {
-  const viewWidth = 4 / baseView.zoom;
-  const viewHeight = viewWidth * (state.height / state.width);
-  const scaleRe = viewWidth / state.width;
-  const scaleIm = viewHeight / state.height;
+  const width = getWidth();
+  const height = getHeight();
 
-  const worldX = baseView.centerRe + (screenX - state.width / 2) * scaleRe;
-  const worldY = baseView.centerIm + (screenY - state.height / 2) * scaleIm;
+  const viewWidth = 4 / baseView.zoom;
+  const viewHeight = viewWidth * (height / width);
+  const scaleRe = viewWidth / width;
+  const scaleIm = viewHeight / height;
+
+  const worldX = baseView.centerRe + (screenX - width / 2) * scaleRe;
+  const worldY = baseView.centerIm + (screenY - height / 2) * scaleIm;
 
   const nextZoom = baseView.zoom * factor;
   const nextViewWidth = 4 / nextZoom;
-  const nextViewHeight = nextViewWidth * (state.height / state.width);
-  const nextScaleRe = nextViewWidth / state.width;
-  const nextScaleIm = nextViewHeight / state.height;
+  const nextViewHeight = nextViewWidth * (height / width);
+  const nextScaleRe = nextViewWidth / width;
+  const nextScaleIm = nextViewHeight / height;
 
   return {
-    centerRe: worldX - (screenX - state.width / 2) * nextScaleRe,
-    centerIm: worldY - (screenY - state.height / 2) * nextScaleIm,
+    centerRe: worldX - (screenX - width / 2) * nextScaleRe,
+    centerIm: worldY - (screenY - height / 2) * nextScaleIm,
     zoom: nextZoom,
   };
 }
@@ -207,7 +239,7 @@ export function beginSmoothZoom(factor: number, screenX: number, screenY: number
       });
     }
     
-    if (state.previewMode === 'legacy') {
+    if ((settingsEngine.getValue('previewMode') as 'current' | 'legacy') === 'legacy') {
       if (animation.previewFrame !== null && animation.to.zoom < animation.from.zoom) {
         drawViewProjection(drawingContext, animation.previewFrame.canvas, animation.previewFrame.view, state.view);
       } else {
@@ -258,10 +290,11 @@ export function resetView() {
 
 export function getWheelZoomFactor(deltaY: number) {
   const baseFactor = deltaY < 0 ? 1.1 : 1 / 1.1;
-  return Math.pow(baseFactor, state.zoomSensitivity);
+  return Math.pow(baseFactor, getZoomSensitivity());
 }
 
 export function getClickZoomFactor(direction: 'in' | 'out') {
   const baseFactor = direction === 'in' ? 1.25 : 1 / 1.25;
-  return Math.pow(baseFactor, state.zoomSensitivity);
+  return Math.pow(baseFactor, getZoomSensitivity());
 }
+
