@@ -541,25 +541,62 @@ A structurally separate progression system, modeled directly on *Farmers Against
 
 **Still undecided:** the garden's resource name (candidates: "Growth Cycles," "Rewrite Generations" — not chosen), the garden's internal prestige currency name, the exact list/order of garden-only vs. crossing upgrades (deferred until other main-game systems, which the crossing unlocks reference, are further along), and the discovery angle (named rule/parameter variants, mirroring real procedural-plant-generation research, analogous to Landmark discovery) has not been built out mechanically.
 
+<!-- Parameter-tweaking discovery hook: deferred, not decided. Two non-exclusive
+approaches under consideration -- (A) a pre-curated pool of known-interesting
+parameter combinations per rule-set, tagged offline and matched by tolerance
+at runtime (mirrors the Landmark discovery resolution in 3.4.2/10.3 exactly);
+(C) a player-driven manual "save this configuration" action, sidestepping any
+automated interestingness judgment entirely. May end up using both together.
+A cheap live-heuristic classifier (B: scoring output on structural properties
+like branch-point count or symmetry) was also discussed and is not ruled out,
+but mirrors the "unrigorous MVP fallback" category already flagged as
+non-primary for Landmark classification in 10.3 -- kept as a fallback note,
+not a leading option. Practicality of A specifically depends on how the
+engine ends up representing/storing parameter state once that part of the
+implementation exists; revisit then. -->
 
-## 4. METAGAME AND PROGRESSION SYSTEMS
+## 4. TECH AND UPGRADE TREES
 
-### 4.1 Core Currencies and Resources
+<!-- This section is a structural placeholder. No node-level content (costs, effects,
+exact counts) should be drafted here until the core formulas referenced in 3.2.3
+(Computational Complexity) and 3.3.2 (Zoom Dynamics) are settled, since upgrade
+costs/effects depend on them. Each subsection below is a stub naming the tree,
+its funding currency, and a pointer back to the Section 3 content that already
+establishes its existence. -->
 
-* **Resource A (Soft):** [Name] — How it is earned, what it buys.
-* **Resource B (Premium):** [Name] — Milestone reward or microtransaction currency.
+Rather than a single upgrade tree, the game has several — one per prestige tier, plus a handful tied to specific features. Each tree is funded by its own currency and, per 8.1.3, the separation between trees is itself a legibility tool: distinct trees signal "this is a different system" to the player. This section is currently structural only; node-level content is deferred until the formulas in 3.2.3 and 3.3.2 are locked.
 
-### 4.2 Prestige and Reset Tiers
+### 4.1 Tier 1 Tree — Reformat Upgrades (WIP)
 
-* **Tier 1 Reset:** [Trigger conditions, what resets, what permanent currency/stat is gained.]
-* **Tier 2 Reset:** [The macro-reset loop, major milestones unlocked.]
+Funded by Residual Checksums (3.6.1). Currently only gestured at in prose ("Compute multipliers / Complexity-scaling reductions — exact effects TBD"). No nodes drafted yet.
 
-### 4.3 The Tech and Upgrade Tree
+### 4.2 Tier 2 Tree — Planetary Engineering Upgrades (WIP)
 
-* **Node Category 1:** [e.g., Active Speed Upgrades]
-* **Node Category 2:** [e.g., Passive/Automation Infrastructure]
+Funded by a currency TBD (3.6.2 — likely its own, per the general "each tier gets its own currency" principle, but not confirmed). Fully unwritten pending the rest of Tier 2's design.
+
+### 4.3 Tier 3 Tree — Other Fractals Upgrades (WIP)
+
+Structure likely one tree per fractal family, or a shared meta-tree plus per-family modifiers (3.6.3 gives Burning Ship as an example: reduced base Compute, boosted Calculated State gain). Fractal family list is itself still undecided.
+
+### 4.4 Region and Landmark Automation Trees (WIP)
+
+Covers AI Navigator automation tiers (3.4.3: random search → smart neighboring-cell search → direct pathing) and Drone purchases (3.5: additional concurrent Julia Set dives). Currently described only as prose progression stages, not as tree nodes.
+
+### 4.5 Idle Garden Tree (WIP)
+
+Funded by the garden's own internal currency (name TBD, 3.7). Per 3.7's firm rule, this tree should never introduce wholly new mechanics — only garden-only upgrades and modest percentage-scale nudges to existing main-game systems.
+
+### 4.6 Between-Tier Feature Trees (WIP)
+
+Covers Multibrot (3.6.5) and any other between-tier features yet to be identified. Multibrot's exact mechanism is still TBD, so whether it warrants a full tree of its own or a handful of standalone unlocks is undecided.
 
 ## 5. VISUAL, THEME, AND UI STYLE
+
+<!-- SPIRAL's console includes a secondary, always-visible monitor showing a
+live, legible-at-a-glance preview of the AXIOM render, requiring no player
+interaction to read. Clicking it expands to a full-viewport interactive view
+of the AXIOM subsystem. Confirmed direction; exact panel placement/sizing
+within the layout not yet decided. See 3.7 for the AXIOM system itself. -->
 
 * **Setting and Lore:** [Brief narrative backdrop framing the abstract systems, e.g., Cyberpunk deckbuilder, dimensional ship]
 * **Visual Style:** [e.g., Low-poly 3D, Minimalist vector, Neon HUD overlay]
@@ -570,6 +607,16 @@ A structurally separate progression system, modeled directly on *Farmers Against
 * **Dashboard/Consoles:** [Where static menus live, e.g., Slim framing edge borders]
 
 ## 6. TECHNICAL ARCHITECTURE
+
+<!-- AXIOM is booted via a literal typed command at SPIRAL's terminal
+(EXEC PGM=AXIOM, matching real JCL invocation syntax). This suggests SPIRAL
+may warrant a general-purpose command interface rather than one hardcoded
+string -- if built generally, the same interface is a plausible home for
+later bonus/hidden features (e.g. a "dev mode" unlock, or redeemable
+promotional codes for premium currency, which would need to respect the
+earnable-equivalent "soft premium-currency lane" rule in Section 7). Not
+decided; flagging so a general command-parsing/registry approach gets
+considered before AXIOM's boot command is built as a one-off special case. -->
 
 * **Engine/Framework:** [e.g., TypeScript with HTML5 Canvas, Unity, Godot]
 * **Performance Mitigation:** [Crucial performance hacks, e.g., Web Workers for multi-threading, Object Pooling]
