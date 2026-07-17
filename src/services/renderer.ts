@@ -1,4 +1,4 @@
-import { ChunkMode, ColorMode, PaletteName, ColorSpace, ViewState, TileTask, WorkerResponse, FractalType } from '../types';
+import { ChunkMode, ColorMode, PaletteName, ColorSpace, ViewState, TileTask, WorkerResponse, FractalType, PanRegion } from '../types';
 import { settingsEngine } from '../settings/instance';
 import { state, renderContext } from '../state';
 import { drawingContext } from '../ui/dom';
@@ -34,12 +34,110 @@ export function cancelActiveRender() {
   renderCallbacks.onRenderCancel();
 }
 
-export function requestRender(focalX?: number, focalY?: number) {
+// --- Pan preview ---------------------------------------------------------
+// During a drag we translate the last completed frame with drawImage for
+// instant, smooth motion, and only dispatch workers for the strip that scrolled
+// into view. The view mapping is isotropic (scaleRe === scaleIm), so a screen
+// translation is an exact world translation — the shifted base pixels are
+// already correct for the new view, so they never need recomputing.
+
+function snapshotPanBase(imageData: ImageData, view: ViewState, width: number, height: number) {
+  if (!renderContext.panBaseCanvas) {
+    renderContext.panBaseCanvas = document.createElement('canvas');
+  }
+  renderContext.panBaseCanvas.width = width;
+  renderContext.panBaseCanvas.height = height;
+  const ctx = renderContext.panBaseCanvas.getContext('2d');
+  if (!ctx) return;
+  ctx.putImageData(imageData, 0, 0);
+  renderContext.panBaseView = { ...view };
+}
+
+function exposedRegion(dxPx: number, dyPx: number, width: number, height: number): PanRegion | null {
+  let x0 = 0;
+  let x1 = width;
+  let y0 = 0;
+  let y1 = height;
+
+  if (dxPx > 0) {
+    x0 = 0;
+    x1 = Math.ceil(dxPx);
+  } else if (dxPx < 0) {
+    x0 = Math.floor(width + dxPx);
+    x1 = width;
+  }
+
+  if (dyPx > 0) {
+    y0 = 0;
+    y1 = Math.ceil(dyPx);
+  } else if (dyPx < 0) {
+    y0 = Math.floor(height + dyPx);
+    y1 = height;
+  }
+
+  if (dxPx === 0 && dyPx === 0) return null;
+
+  const cx0 = Math.max(0, Math.min(width, x0));
+  const cy0 = Math.max(0, Math.min(height, y0));
+  const cx1 = Math.max(0, Math.min(width, x1));
+  const cy1 = Math.max(0, Math.min(height, y1));
+  if (cx1 <= cx0 || cy1 <= cy0) return null;
+  return { x0: cx0, y0: cy0, x1: cx1, y1: cy1 };
+}
+
+export function startPanPreview() {
+  renderContext.panActive = true;
+  renderContext.panRenderScheduled = false;
+  const width = settingsEngine.getValue('width') as number;
+  const height = settingsEngine.getValue('height') as number;
+  snapshotPanBase(drawingContext.getImageData(0, 0, width, height), { ...state.view }, width, height);
+}
+
+export function updatePanPreview() {
+  if (!renderContext.panActive || !renderContext.panBaseCanvas || !renderContext.panBaseView) {
+    requestRender();
+    return;
+  }
+
+  const width = settingsEngine.getValue('width') as number;
+  const height = settingsEngine.getValue('height') as number;
+  const scaleRe = (4 / state.view.zoom) / width; // isotropic: scaleRe === scaleIm
+  const dxPx = (renderContext.panBaseView.centerRe - state.view.centerRe) / scaleRe;
+  const dyPx = (renderContext.panBaseView.centerIm - state.view.centerIm) / scaleRe;
+
+  // Instant, smooth translation of the last completed frame.
+  drawingContext.drawImage(renderContext.panBaseCanvas, dxPx, dyPx);
+
+  const region = exposedRegion(dxPx, dyPx, width, height);
+  if (region && !renderContext.panRenderScheduled) {
+    renderContext.panRenderScheduled = true;
+    requestRender(undefined, undefined, region);
+  }
+}
+
+export function endPanPreview() {
+  renderContext.panActive = false;
+  if (!renderContext.panBaseCanvas || !renderContext.panBaseView) {
+    return;
+  }
+  const width = settingsEngine.getValue('width') as number;
+  const height = settingsEngine.getValue('height') as number;
+  const scaleRe = (4 / state.view.zoom) / width;
+  const dxPx = (renderContext.panBaseView.centerRe - state.view.centerRe) / scaleRe;
+  const dyPx = (renderContext.panBaseView.centerIm - state.view.centerIm) / scaleRe;
+  const region = exposedRegion(dxPx, dyPx, width, height);
+  if (region) {
+    requestRender(undefined, undefined, region);
+  }
+}
+
+export function requestRender(focalX?: number, focalY?: number, region?: PanRegion) {
   state.activeRenderId += 1;
   markDebug('render:request', {
     nextRenderId: state.activeRenderId,
+    region: region ? `${region.x0},${region.y0}-${region.x1},${region.y1}` : null,
   });
-  renderFrame(state.activeRenderId, focalX, focalY);
+  renderFrame(state.activeRenderId, focalX, focalY, region);
 }
 
 function tileDistanceSquared(tile: TileTask, x: number, y: number) {
@@ -50,8 +148,12 @@ function tileDistanceSquared(tile: TileTask, x: number, y: number) {
   return dx * dx + dy * dy;
 }
 
-export function renderFrame(renderId: number, focalX?: number, focalY?: number) {
-  renderCallbacks.onRenderStart(renderId);
+export function renderFrame(renderId: number, focalX?: number, focalY?: number, region?: PanRegion) {
+  // Region renders are incremental pan fills: no start/complete callbacks, no
+  // log spam — just compute the newly-exposed strip and composite it.
+  if (!region) {
+    renderCallbacks.onRenderStart(renderId);
+  }
   terminateWorkers();
 
   const width = settingsEngine.getValue('width') as number;
@@ -112,7 +214,27 @@ export function renderFrame(renderId: number, focalX?: number, focalY?: number) 
   const scaleIm = viewHeight / height;
   const queue: TileTask[] = [];
 
-    if (chunkMode === 'none') {
+  if (region) {
+    // Incremental pan fill: only build tiles that intersect the exposed strip,
+    // so already-on-screen pixels (seeded from the current canvas below) are
+    // never recomputed. Force a grid regardless of chunkMode so we can filter.
+    const columns = Math.max(1, gridColumns);
+    const rows = Math.max(1, gridRows);
+    const chunkWidth = width / columns;
+    const chunkHeight = height / rows;
+
+    for (let row = 0; row < rows; row += 1) {
+      const rowStart = Math.floor(row * chunkHeight);
+      const rowEnd = Math.min(height, Math.floor((row + 1) * chunkHeight));
+      for (let col = 0; col < columns; col += 1) {
+        const colStart = Math.floor(col * chunkWidth);
+        const colEnd = Math.min(width, Math.floor((col + 1) * chunkWidth));
+        if (colEnd <= region.x0 || colStart >= region.x1) continue;
+        if (rowEnd <= region.y0 || rowStart >= region.y1) continue;
+        queue.push({ rowStart, rowEnd, colStart, colEnd });
+      }
+    }
+  } else if (chunkMode === 'none') {
       queue.push({ rowStart: 0, rowEnd: height, colStart: 0, colEnd: width });
     } else {
       const columns = Math.max(1, gridColumns);
@@ -158,20 +280,26 @@ export function renderFrame(renderId: number, focalX?: number, focalY?: number) 
       return;
     }
 
-    drawingContext.putImageData(imageData, 0, 0);
-    state.lastRenderMs = performance.now() - start;
-    state.lastSteps = totalSteps;
-    terminateWorkers();
-    markDebug('render:finish', {
-      completedChunks,
-      totalChunks,
-      solidGuessedChunks,
-      culledPixels,
-      periodicityShortCircuits,
-      ms: Number(state.lastRenderMs.toFixed(2)),
-    }, renderId);
+    // Keep the last completed frame as the pan base so successive pans can
+    // translate it instead of recomputing the whole canvas.
+    snapshotPanBase(imageData, renderView, width, height);
 
-    renderCallbacks.onRenderComplete(renderView, state.lastRenderMs, totalSteps);
+    if (!region) {
+      drawingContext.putImageData(imageData, 0, 0);
+      state.lastRenderMs = performance.now() - start;
+      state.lastSteps = totalSteps;
+      terminateWorkers();
+      markDebug('render:finish', {
+        completedChunks,
+        totalChunks,
+        solidGuessedChunks,
+        culledPixels,
+        periodicityShortCircuits,
+        ms: Number(state.lastRenderMs.toFixed(2)),
+      }, renderId);
+
+      renderCallbacks.onRenderComplete(renderView, state.lastRenderMs, totalSteps);
+    }
   };
 
   const scheduleTask = (worker: Worker) => {

@@ -106,6 +106,7 @@ export function mountSettings() {
 
 export function handlePointerDown(event: MouseEvent) {
   dragState.active = true;
+  dragState.moved = false;
   dragState.startX = event.clientX;
   dragState.startY = event.clientY;
   dragState.startCenterRe = state.view.centerRe;
@@ -122,6 +123,13 @@ export function handlePointerMove(event: MouseEvent) {
   const height = getHeight();
   const dx = event.clientX - dragState.startX;
   const dy = event.clientY - dragState.startY;
+
+  // A drag past a small threshold counts as panning, not clicking — this
+  // suppresses the zoom that would otherwise fire on the trailing `click`.
+  if (Math.abs(dx) > 3 || Math.abs(dy) > 3) {
+    dragState.moved = true;
+  }
+
   const viewWidth = 4 / state.view.zoom;
   const viewHeight = viewWidth * (height / width);
   const scaleRe = viewWidth / width;
@@ -154,6 +162,11 @@ export function handleWheel(event: WheelEvent) {
 }
 
 export function handleClick(event: MouseEvent) {
+  // If the pointer was dragged (panned), the trailing `click` should not zoom.
+  if (dragState.moved) {
+    return;
+  }
+
   const zoomMode = settingsEngine.getValue('zoomMode') as 'instant' | 'smooth';
 
   if (event.button !== 0) {

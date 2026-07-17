@@ -28,6 +28,7 @@ export const state: RenderState = {
 
 export const dragState: DragState = {
   active: false,
+  moved: false,
   startX: 0,
   startY: 0,
   startCenterRe: 0,
@@ -43,4 +44,10 @@ export const renderContext = {
   benchmarkTimer: null as number | null,
   renderTimerStart: null as number | null,
   renderTimerFrame: null as number | null,
+  // Snapshot of the last fully-rendered frame, used to translate the image
+  // during a pan so only newly-exposed tiles need computing.
+  panBaseCanvas: null as HTMLCanvasElement | null,
+  panBaseView: null as ViewState | null,
+  panActive: false,
+  panRenderScheduled: false,
 };

@@ -41,6 +41,7 @@ export type RenderState = {
 
 export type DragState = {
   active: boolean;
+  moved: boolean;
   startX: number;
   startY: number;
   startCenterRe: number;
@@ -130,6 +131,9 @@ export type BenchmarkCase = {
   chunkMode: ChunkMode;
   zoomMode: 'instant' | 'smooth';
 };
+
+// Pixel-space rectangle for incremental renders (pan). Inclusive-exclusive.
+export type PanRegion = { x0: number; y0: number; x1: number; y1: number };
 
 export type DebugEvent = {
   index: number;
