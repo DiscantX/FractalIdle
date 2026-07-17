@@ -245,3 +245,29 @@ export function assembleFromCache(
     misses,
   };
 }
+
+/**
+ * If `view`'s entire viewport is already cached, return a `width×height` canvas
+ * holding exactly that viewport (used as a zoom-out preview so a previously
+ * visited level appears instantly with no pop-in). Returns null when any tile
+ * is missing, so callers can fall back to scaling the current frame instead.
+ */
+export function assembleCachedViewport(view: ViewState, width: number, height: number): HTMLCanvasElement | null {
+  const assembled = assembleFromCache(view, width, height, false);
+  if (assembled.misses.length > 0) return null;
+
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return null;
+  ctx.imageSmoothingEnabled = false;
+  const sx0 =
+    (assembled.assemblyCenterRe - view.centerRe) / assembled.scaleRe +
+    (width - assembled.assemblyWidth) / 2;
+  const sy0 =
+    (assembled.assemblyCenterIm - view.centerIm) / assembled.scaleIm +
+    (height - assembled.assemblyHeight) / 2;
+  ctx.drawImage(assembled.assembly, Math.round(sx0), Math.round(sy0));
+  return canvas;
+}

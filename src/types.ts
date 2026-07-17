@@ -13,6 +13,12 @@ export type ZoomAnimationState = {
   originX: number;
   originY: number;
   previewCanvas: HTMLCanvasElement;
+  // Zoom-out only: a fully-cached snapshot of the target (`to`) viewport, and
+  // the view it was assembled for. When present, it's projected as the base
+  // layer during the animation so revealed border area shows real cached pixels
+  // instead of placeholder (no pop-in). Null when the target isn't fully cached.
+  targetPreviewCanvas: HTMLCanvasElement | null;
+  previewView: ViewState | null;
 };
 
 export type ChunkMode = 'none' | 'rectangles';

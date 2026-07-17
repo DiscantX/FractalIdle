@@ -4,6 +4,7 @@ import { canvas, drawingContext } from '../ui/dom';
 import { clamp } from '../utils/math';
 import { markDebug } from '../utils/debug';
 import { settingsEngine } from '../settings/instance';
+import { assembleCachedViewport } from './tile-cache';
 
 function getWidth(): number {
   return settingsEngine.getValue('width') as number;
@@ -32,6 +33,7 @@ export function drawViewProjection(
   sourceCanvas: HTMLCanvasElement,
   sourceView: ViewState,
   targetView: ViewState,
+  fillPlaceholder = true,
 ) {
   const width = getWidth();
   const height = getHeight();
@@ -49,8 +51,10 @@ export function drawViewProjection(
 
   targetContext.save();
   targetContext.imageSmoothingEnabled = false;
-  targetContext.fillStyle = PREVIEW_PLACEHOLDER_COLOR;
-  targetContext.fillRect(0, 0, width, height);
+  if (fillPlaceholder) {
+    targetContext.fillStyle = PREVIEW_PLACEHOLDER_COLOR;
+    targetContext.fillRect(0, 0, width, height);
+  }
   targetContext.drawImage(sourceCanvas, offsetX, offsetY, width * scale, height * scale);
   targetContext.restore();
 }
@@ -150,6 +154,13 @@ export function beginSmoothZoom(factor: number, screenX: number, screenY: number
   // cache) at viewport resolution. Scaling this during the animation gives the
   // low-res-preview-snaps-to-high-res effect.
   const previewCanvas = createSmoothPreviewCanvas();
+  // Zooming out reveals area outside the current frame. If that wider target
+  // level is already fully cached, assemble it now and project it as the base
+  // layer during the animation so the revealed border shows real pixels
+  // instantly instead of popping in from placeholder when the render lands.
+  const targetPreviewCanvas = isZoomingOut
+    ? assembleCachedViewport(to, getWidth(), getHeight())
+    : null;
   markDebug('zoom:smooth-begin', {
     factor: Number(factor.toPrecision(8)),
     screenX,
@@ -157,6 +168,7 @@ export function beginSmoothZoom(factor: number, screenX: number, screenY: number
     fromZoom: Number(from.zoom.toPrecision(8)),
     toZoom: Number(to.zoom.toPrecision(8)),
     isZoomingOut,
+    targetCached: targetPreviewCanvas !== null,
   });
 
   const animation: ZoomAnimationState = {
@@ -168,6 +180,8 @@ export function beginSmoothZoom(factor: number, screenX: number, screenY: number
     originX: screenX,
     originY: screenY,
     previewCanvas,
+    targetPreviewCanvas,
+    previewView: targetPreviewCanvas ? to : null,
   };
 
   const step = (currentTime: number) => {
@@ -195,7 +209,17 @@ export function beginSmoothZoom(factor: number, screenX: number, screenY: number
         // Zoom out: project the (higher-zoom) start frame shrinking into place
         // within the wider view, so the previous image stays visible at the
         // correct size and position rather than a bare scale-around-origin.
-        drawViewProjection(drawingContext, animation.previewCanvas, animation.from, state.view);
+        if (animation.targetPreviewCanvas && animation.previewView) {
+          // Base layer: the fully-cached target viewport projected into the
+          // current (narrower) view fills the whole screen with real pixels,
+          // so no placeholder shows in the border being revealed.
+          drawViewProjection(drawingContext, animation.targetPreviewCanvas, animation.previewView, state.view);
+          // Top layer: the start frame shrinking in, drawn without clearing so
+          // it composites over the cached base rather than replacing it.
+          drawViewProjection(drawingContext, animation.previewCanvas, animation.from, state.view, false);
+        } else {
+          drawViewProjection(drawingContext, animation.previewCanvas, animation.from, state.view);
+        }
       } else {
         drawZoomPreview(currentScale, animation.originX, animation.originY, animation.previewCanvas);
       }
