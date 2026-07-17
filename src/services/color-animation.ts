@@ -1,7 +1,7 @@
 import { settingsEngine } from '../settings/instance';
 import { paintBaseScalarFrame, paintUniformColorFrame, requestRender, isRenderActive } from './renderer';
 import { clamp01 } from '../utils/math';
-import { state, renderContext } from '../state';
+import { state } from '../state';
 import { zoomCallbacks } from './zoom-manager';
 import { markDebug } from '../utils/debug';
 
@@ -50,15 +50,15 @@ export const animationCallbacks = {
   onPhaseChange: (_phase: number) => {},
 };
 
-// True while an interaction (smooth zoom / pan) owns the live canvas via its own
-// pipeline. During those, the loop still ADVANCES the hue (so the color keeps
-// moving and the interaction's own present path — which reads the current hue —
-// stays in sync), but it must NOT paint the base frame itself: the interaction
-// paints the uniform-color frame via paintUniformColorFrame. That's what makes
-// the hue cycle AND the zoom/pan coexist with a single uniform color. Idle (no
-// interaction), the loop owns the canvas and paints directly.
+// True while the smooth-zoom animation owns the live canvas via its own rAF: the
+// zoom step is tightly coupled to the per-frame view interpolation, so it paints
+// the uniform frame itself and this loop must not double-paint. The loop still
+// advances the hue so the zoom step reads the live value. Panning is NOT included:
+// the color loop paints pan frames (it reads the live state.view, updated by the
+// drag) so detail keeps resolving between mouse moves — updatePanPreview defers
+// painting to it while animating.
 function interactionOwnsCanvas(): boolean {
-  return state.zoomAnimation !== null || renderContext.panActive;
+  return state.zoomAnimation !== null;
 }
 
 // Map the current phase onto the active animation's target setting, then paint
@@ -78,7 +78,11 @@ function applyPhase(): void {
   // this loop just keeps the hue advancing (above) so their present reads the
   // live hue — it must not also paint here, or fire cache-canceling renders.
   if (!interactionOwnsCanvas() && !dive.active) {
-    const painted = paintBaseScalarFrame();
+    // Fast path: exact-view base frame. Fall back to the general uniform path
+    // (gap-free, any view) so the cycle keeps running through gesture/dive
+    // transitions where the captured base is momentarily stale — instead of
+    // failing and stalling. Only ask for a render when nothing is cached at all.
+    const painted = paintBaseScalarFrame() || paintUniformColorFrame();
     if (!painted) {
       if (!anim.pendingBaseRender) {
         anim.pendingBaseRender = true;

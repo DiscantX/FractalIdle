@@ -706,110 +706,73 @@ export function assembleBestCachedViewport(
 }
 
 // --- Uniform-color (single-hue) viewport assembly -------------------------
-// Like assembleScaledViewport, but at Stage 1: read the raw scalar tiles of the
-// best cached level into one Float32Array (no color yet), so a single colorize
-// pass can color the WHOLE frame at one hue. This is what lets a moving hue stay
-// uniform across the entire viewport during animation — see AssembledScalarAtZoom
-// below and the color-animation / deep-dive paths that use it.
-export type AssembledScalarAtZoom = {
-  data: Float32Array; // native-res scalar field (candidateZoom tile grid)
-  nativeW: number;
-  nativeH: number;
-  maxIterations: number;
-  // Screen placement of the native buffer within the target `width×height` frame
-  // (computed exactly like assembleScaledViewport's drawImage call), so the
-  // caller can scale-blit it into the right spot.
-  screenX: number;
-  screenY: number;
-  drawW: number;
-  drawH: number;
-};
+// Colorize the visible frame from raw Tier-1 scalar tiles in single hue passes,
+// so a moving hue stays uniform across the whole viewport during animation. Two
+// layers are composited (both colorized at the same `params`, so still one hue):
+//   1. a soft BASE from the nearest fully-cached level (guarantees no gaps), and
+//   2. a crisp OVERLAY of the exact level's available tiles (partial ok), with
+//      missing tiles left transparent so the base shows through.
+// The overlay is what lets the frame RESOLVE progressively while the user is
+// interacting: exact tiles appear the instant they compute, instead of waiting
+// for the whole level to finish (the deep-dive-only behavior before).
 
-export function assembleScalarAtZoom(
+// Colorize one cached zoom level into a `width×height` canvas at a single hue,
+// scaled/placed for `view`. With allowGaps, tiles not yet cached are left
+// transparent (for the crisp overlay); without it, missing tiles take the
+// palette's zero color (only used for a base layer that is already near-complete).
+// Returns null when the level has zero cached coverage.
+function assembleUniformLayer(
   view: ViewState,
   width: number,
   height: number,
   candidateZoom: number,
-): AssembledScalarAtZoom | null {
+  params: ColorParams,
+  allowGaps: boolean,
+): HTMLCanvasElement | null {
   const computeSig = computeComputeSignature();
   const { scaleRe, scaleIm } = scaleForView(view, width, height);
   const r = candidateTileRange(view, width, height, candidateZoom);
   const maxIterations = settingsEngine.getValue('maxIterations') as number;
+  const nativeW = r.numTilesX * r.tw;
+  const nativeH = r.numTilesY * r.th;
 
-  const data = new Float32Array(r.numTilesX * r.tw * r.numTilesY * r.th);
+  const data = new Float32Array(nativeW * nativeH);
+  const missing: Array<{ i: number; j: number }> = [];
   let covered = 0;
   for (let j = 0; j < r.numTilesY; j += 1) {
     for (let i = 0; i < r.numTilesX; i += 1) {
       const key = keyFor(computeSig, candidateZoom, r.colStart + i, r.rowStart + j);
       const tile = scalarCache.get(key);
       if (tile) {
+        covered += 1;
         for (let ty = 0; ty < r.th; ty += 1) {
           const srcOff = ty * r.tw;
-          const dstOff = (j * r.th + ty) * (r.numTilesX * r.tw) + i * r.tw;
-          for (let tx = 0; tx < r.tw; tx += 1) {
-            data[dstOff + tx] = tile.data[srcOff + tx];
-          }
+          const dstOff = (j * r.th + ty) * nativeW + i * r.tw;
+          for (let tx = 0; tx < r.tw; tx += 1) data[dstOff + tx] = tile.data[srcOff + tx];
         }
-        covered += 1;
+      } else {
+        missing.push({ i, j });
       }
     }
   }
   if (covered === 0) return null;
 
+  const native = document.createElement('canvas');
+  native.width = nativeW;
+  native.height = nativeH;
+  const nctx = native.getContext('2d');
+  if (!nctx) return null;
+  const img = colorizeScalarField(data, nativeW, nativeH, maxIterations, params);
+  nctx.putImageData(img, 0, 0);
+  if (allowGaps) {
+    // Punch out uncomputed tiles so the base layer below shows through.
+    for (const m of missing) nctx.clearRect(m.i * r.tw, m.j * r.th, r.tw, r.th);
+  }
+
   const screenX = (r.colStart * r.tileWorldW - (view.centerRe - (width / 2) * scaleRe)) / scaleRe;
   const screenY = (r.rowStart * r.tileWorldH - (view.centerIm - (height / 2) * scaleIm)) / scaleIm;
   const drawW = (r.numTilesX * r.tileWorldW) / scaleRe;
   const drawH = (r.numTilesY * r.tileWorldH) / scaleIm;
-
-  return {
-    data,
-    nativeW: r.numTilesX * r.tw,
-    nativeH: r.numTilesY * r.th,
-    maxIterations,
-    screenX,
-    screenY,
-    drawW,
-    drawH,
-  };
-}
-
-/**
- * Assemble a `width×height` canvas depicting `view` from the nearest cached zoom
- * level, but colorized in a SINGLE pass at `params` — so the whole frame shares
- * one hue (no per-tile/per-layer hue mismatch while the color is animating).
- * Returns null when no cached level covers the viewport, so callers fall back to
- * their existing behavior.
- *
- * Level selection requires near-FULL coverage (not just the nearest level): a
- * partially-rendered level would leave uncovered tiles that colorize to the
- * palette's zero color (black on viridis) — the "black chunks" during a dive. By
- * demanding full coverage, pickBestCachedZoom skips a half-done exact level and
- * falls back to a complete (if softer, upscaled) shallower level, so every frame
- * is gap-free; it sharpens to the exact level once that finishes computing. We do
- * NOT exclude the current zoom — the exact level is the preferred pick once ready.
- */
-export function assembleUniformColorViewport(
-  view: ViewState,
-  width: number,
-  height: number,
-  params: ColorParams,
-): HTMLCanvasElement | null {
-  const bestZoom = pickBestCachedZoom(view, width, height, {
-    depthMode: 'unlimited',
-    maxOctaves: 32,
-    minCoverage: 0.999,
-  });
-  if (bestZoom === null) return null;
-  const scalar = assembleScalarAtZoom(view, width, height, bestZoom);
-  if (!scalar) return null;
-
-  const native = document.createElement('canvas');
-  native.width = scalar.nativeW;
-  native.height = scalar.nativeH;
-  const nctx = native.getContext('2d');
-  if (!nctx) return null;
-  const img = colorizeScalarField(scalar.data, scalar.nativeW, scalar.nativeH, scalar.maxIterations, params);
-  nctx.putImageData(img, 0, 0);
 
   const canvas = document.createElement('canvas');
   canvas.width = width;
@@ -817,14 +780,60 @@ export function assembleUniformColorViewport(
   const ctx = canvas.getContext('2d');
   if (!ctx) return null;
   ctx.imageSmoothingEnabled = true;
-  ctx.drawImage(
-    native,
-    Math.round(scalar.screenX),
-    Math.round(scalar.screenY),
-    Math.round(scalar.drawW),
-    Math.round(scalar.drawH),
-  );
+  ctx.drawImage(native, Math.round(screenX), Math.round(screenY), Math.round(drawW), Math.round(drawH));
   return canvas;
+}
+
+/**
+ * Assemble a `width×height` canvas depicting `view`, colorized uniformly at a
+ * single hue, resolving progressively: a soft complete base (upscaled nearest
+ * fully-cached level, never gappy) with the exact level's available tiles
+ * composited crisply on top. Returns null when nothing is cached yet, so callers
+ * fall back / keep the last frame.
+ */
+export function assembleUniformColorViewport(
+  view: ViewState,
+  width: number,
+  height: number,
+  params: ColorParams,
+): HTMLCanvasElement | null {
+  const exactZoom = view.zoom;
+  // Soft base: nearest COMPLETE level (guarantees full coverage → no gaps/black).
+  const baseZoom = pickBestCachedZoom(view, width, height, {
+    depthMode: 'unlimited',
+    maxOctaves: 32,
+    minCoverage: 0.999,
+  });
+
+  const out = document.createElement('canvas');
+  out.width = width;
+  out.height = height;
+  const octx = out.getContext('2d');
+  if (!octx) return null;
+  octx.imageSmoothingEnabled = true;
+
+  let painted = false;
+  if (baseZoom !== null) {
+    const base = assembleUniformLayer(view, width, height, baseZoom, params, false);
+    if (base) {
+      octx.drawImage(base, 0, 0);
+      painted = true;
+    }
+  }
+
+  // Crisp overlay: the exact level's available tiles (partial ok) for progressive
+  // resolution. Skip when the base already IS the exact level. Gaps are allowed
+  // only when a base is under it; with no base, fill gaps opaquely (last resort,
+  // only right after a cache clear) so nothing stale shows through.
+  if (baseZoom === null || zoomKey(baseZoom) !== zoomKey(exactZoom)) {
+    const exact = assembleUniformLayer(view, width, height, exactZoom, params, painted);
+    if (exact) {
+      octx.drawImage(exact, 0, 0);
+      painted = true;
+    }
+  }
+
+  return painted ? out : null;
 }
 
 // --- Base scalar-frame capture ----------------------------------------------

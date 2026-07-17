@@ -249,12 +249,12 @@ export function updatePanPreview() {
   const width = settingsEngine.getValue('width') as number;
   const height = settingsEngine.getValue('height') as number;
 
-  // While the color animation is playing, render the whole frame from the scalar
-  // tiles in ONE hue pass instead of compositing cached color tiles — this keeps
-  // the frame uniformly colored as it pans (rather than showing per-tile hues
-  // frozen at their last colorize). Falls back to the normal path if nothing is
-  // cached yet for this view.
-  if (isAnimationPlaying() && paintUniformColorFrame(state.view)) {
+  // While the color animation is playing, the color loop is the painter: it
+  // repaints the uniform, progressively-resolving frame every rAF from the live
+  // state.view (which the drag updates), so detail keeps sharpening even between
+  // mouse moves. Here we only keep a render scheduled so new tiles compute; we do
+  // NOT paint (that would fight the color loop and show per-tile hues).
+  if (isAnimationPlaying()) {
     if (!renderContext.panRenderScheduled) {
       renderContext.panRenderScheduled = true;
       requestRender();
@@ -609,11 +609,19 @@ export function renderFrame(
   // animation completion. `paintLive` is used by handleResult/finalize (which run
   // after `activeRender` is assigned) and honors the live flag so a background
   // render (present=false) never paints — keeping the zoom animation on screen.
+  //
+  // While the color animation is playing, the render pipeline paints NOTHING: it
+  // still computes + caches tiles, but the color-animation / gesture / deep-dive
+  // loops are the sole painters (always via the gap-free uniform-color path). This
+  // stops the progressive, per-tile Tier-2 present — colorized at each render's
+  // frozen start hue — from stamping mismatched blocks over the smoothly-cycling
+  // frame (the "blocks render at different times" artifact, and the color-not-
+  // retained jump when a gesture/dive settles).
   const presentNow = () => {
-    if (present) presentAssembly(assembled, state.view);
+    if (present && !isAnimationPlaying()) presentAssembly(assembled, state.view);
   };
   const paintLive = () => {
-    if (activeRender?.present) presentAssembly(assembled, state.view);
+    if (activeRender?.present && !isAnimationPlaying()) presentAssembly(assembled, state.view);
   };
 
   // Primary (screen) layer goes FIRST in the queue, focal-sorted so the
@@ -681,8 +689,9 @@ export function renderFrame(
   const hasWork = queue.length > 0;
 
   // Build + paint the primary assembly up front (cached tiles show immediately;
-  // the rest fill in progressively). Skipped for a background zoom render.
-  if (present) presentAssembly(assembled, state.view);
+  // the rest fill in progressively). Skipped for a background zoom render, and
+  // while the color animation owns the canvas (see presentNow/paintLive above).
+  if (present && !isAnimationPlaying()) presentAssembly(assembled, state.view);
 
   renderCallbacks.onRenderStart(renderId);
 
