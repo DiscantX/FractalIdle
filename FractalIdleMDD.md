@@ -525,21 +525,65 @@ Not every unlock needs to be a full prestige tier. Confirmed so far:
 * **Multibrot** (formula-exponent progression, $z^2+c \rightarrow z^3+c \rightarrow z^5+c$, tending toward a circle at higher exponents): placed as a standalone feature unlock landing between Tier 2 and Tier 3, not a full prestige tier itself, and not folded into the Tier 3 fractal-family list. Exact mechanism TBD.
 * The Tier 2 → Tier 3 gap (roughly one week to one month-plus under current pacing) is explicitly expected to want **more** such features beyond just Multibrot, to keep the "always a near goal" principle (3.6.4) satisfied across a longer stretch — additional candidates not yet identified.
 
-### 3.7 The Idle Garden (L-System Side-Loop) (WIP — structure decided, specifics pending)
+### 3.7 AXIOM (L-System Side-Loop)
 
-A structurally separate progression system, modeled directly on *Farmers Against Potatoes'* potato-farm mini-game: its own resource, its own internal upgrade tree, and its own self-contained prestige loop, bridged to the main game only through occasional, deliberately modest cross-system unlocks.
+A structurally separate progression system — its own resource, its own internal upgrade tree, and its own self-contained prestige loop — bridged to the main game only through occasional, deliberately modest cross-system unlocks. The self-contained-loop-with-a-thin-bridge *shape* is structurally modeled on *Farmers Against Potatoes'* potato-farm mini-game (a comparison used only for that structural pattern, not for AXIOM's theme or content).
 
-**Why it's structurally separate:** unlike the main zoom loop (continuous camera depth/precision), Lindenmayer-system (L-system) fractals — the string-rewriting rules behind procedural plants, ferns, and coastlines — progress via a plain integer **generation count** (how many times the rewrite rule has been applied). This is a genuinely different core stat from zoom depth, not just a different skin, so it's modeled as an independent loop rather than folded into the main one. The main game remains fully playable and complete without it.
+**Why it's structurally separate:** unlike the main zoom loop (continuous camera depth/precision), Lindenmayer-system (L-system) fractals — the string-rewriting rules behind procedural plants, trees, and root structures, and, in their simpler forms, purely geometric fractal curves as well (Koch snowflake, Sierpinski gasket, dragon curve) — progress via a plain integer **Generation count** (how many times the rewrite rule has been applied). This is a genuinely different core stat from zoom depth, not just a different skin, so it's modeled as an independent loop rather than folded into the main one. The main game remains fully playable and complete without it.
 
-**Decided:**
+#### 3.7.1 Diegetic Framing
 
-* **Unlock timing:** very early — deliberately mirroring *Farmers Against Potatoes'* own near-immediate farm unlock — specifically to demonstrate early that the game has multiple layers of mechanics (3.6.4's "show, don't tell" principle in action).
-* **Progression shape, mirroring FAP's own upgrade sequencing:** a run of garden-only upgrades first (faster/cheaper generation advancement, new base rule-sets/plant species as garden-only content), before any main-game-crossing unlock appears.
-* **Internal prestige:** the garden has its own self-contained "harvest & replant" reset, producing its own internal currency that, at least early on, is spendable only within the garden.
-* **First main-game-crossing unlock:** modeled directly on FAP's first farm-to-main-game unlock (a single grant of their base prestige currency) — ours is planned as a small grant of **Residual Checksums** (Tier 1 currency), chosen specifically because it's the earliest, most legible payoff available, teaching the player "the garden matters to the real game" using a currency they already understand.
-* **Subsequent main-game-crossing unlocks:** modest, percentage-scale nudges to *existing* systems (e.g., small reductions to effective Complexity cost, small boosts to State conversion, discovery-odds/speed modifiers once relevant systems exist) — interleaved with further garden-only upgrades, FAP-style. A firm rule: the garden should almost never introduce a wholly new mechanic of its own; new mechanics are reserved for main-game "bottom bar" unlocks, and the garden's job is to be a steady drip of small improvements plus occasional currency injections.
+AXIOM is not a corporate purchase, and does not follow the sterile corporate/military-industrial naming convention that governs Earth-purchased infrastructure (8.1.2) — that convention specifically covers hardware and software bought with Calculated States from Earth coalitions, and AXIOM's currency never touches Earth. Instead, AXIOM is factory-installed onboard diagnostic software: an internal computational sandbox SPIRAL uses to calibrate/test rendering techniques on simpler recursive fractals before trusting them on the real i-Space render. Nothing organic is literally growing aboard the ship; it is a simulation SPIRAL runs, inside itself.
 
-**Still undecided:** the garden's resource name (candidates: "Growth Cycles," "Rewrite Generations" — not chosen), the garden's internal prestige currency name, the exact list/order of garden-only vs. crossing upgrades (deferred until other main-game systems, which the crossing unlocks reference, are further along), and the discovery angle (named rule/parameter variants, mirroring real procedural-plant-generation research, analogous to Landmark discovery) has not been built out mechanically.
+**Designation:** `LOAD MODULE: AXIOM`, following the real 1960s IBM mainframe terminology for a compiled, executable program (distinct from the more generic "MODULE" designation used for F.R.A.M.E. in 2.3.2, which is installed as a patch, not invoked as a standalone runnable program).
+
+**Access:** first unlocked via a mandatory, SPIRAL-prompted typed command at her terminal — `EXEC PGM=AXIOM`, using real IBM JCL invocation syntax. After the first boot, a UI button unlocks for subsequent access; the typed command continues to work as an alternate path.
+
+**Display:** rendered on a dedicated in-fiction monitor on SPIRAL's own console, distinct from the main i-Space viewport (see Section 5 placeholder note). AXIOM's fractals are never drawn on the player's main viewport; they exist only on SPIRAL's screen.
+
+#### 3.7.2 Core Loop
+
+* **Generation count** is the per-Instance progression stat (3.7.3), always starting at 0 for a new Instance.
+* **Cost curve:** the L-system's rewrite string grows exponentially per generation — a real, unforced fact — so advancing generations gets honestly, increasingly expensive, the same "real computable wall" pattern used for Computational Complexity (3.2.3), just scoped internally to AXIOM.
+* **Currency: Symbols** — named for the L-system term for the members of its rewrite alphabet. Earned by advancing generations in the currently active (topmost) Instance only. Spent on generation-advancement-rate upgrades and unlocking sophistication tiers and individual rule-sets within them (3.7.4). Main-game-crossing unlocks (3.7.6) are also purchased with Symbols — AXIOM has exactly one currency, doing all of these jobs.
+* **Interaction texture:** the player can directly tweak an active rule-set's turtle-graphics interpretation parameters (branch angle, segment length ratio, etc.) and watch the rendered shape respond live. This is **cosmetic only** — no effect on generation-advancement rate, Symbol income, or Nesting Depth. A low-stakes toy to interact with between upgrade purchases, fitting AXIOM's framing as a literal testbed the player is poking at.
+
+#### 3.7.3 Fork and Instance
+
+* **Fork** is the internal prestige action, entirely player-triggered — there is no forced or automatic trigger. The exponential cost curve (3.7.2) creates incentive to Fork without ever forcing it, the same "no hard gate" philosophy as Reformat (3.6.1).
+* Forking creates a new **Instance** — a complete, independent AXIOM session with its own Generation count (reset to 0) and its own selected rule-set (3.7.4).
+* **Fork is non-destructive.** Nothing is discarded. The previous Instance is buried beneath the new one and can be revisited on demand (redrawn from its own saved parameters) at any time. This deliberately diverges from Reformat's destructive "clear the Buffer" model — Fork stacks, it doesn't wipe.
+* **Never-freeze:** every buried Instance continues advancing indefinitely, not just the active one. This is a firm architectural requirement, not a soft preference: **each Instance's advancement must be strictly O(1) per Instance and calculated analytically/closed-form** (invariant to how it's split across calls — never simulated tick-by-tick in a loop, never dependent on scanning a list sized by total Instance count). Violating this reopens a real performance risk at long-lived-save scale that was otherwise ruled out.
+* **Nesting Depth** tracks how many Instances are currently stacked. It is not a spendable currency, and there is no separate Fork-reward currency — Depth drives an automatic compounding effect with no purchase step.
+* **Compounding model — a live cascade, not a flat sum:** each buried Instance's ongoing (still-advancing) output feeds directly into strengthening the Instance immediately above it in the stack. That boosted Instance's own output then feeds the one above *it*, and so on, up to the currently active Instance — continuously strengthened by the entire chain beneath it, without any Instance needing to look further back than its immediate neighbor. This keeps the cascade local (satisfying the O(1)-per-Instance requirement above) while the compounding effect still reaches the top of the stack for free. Exact formula deferred alongside the other core cost/production formulas (3.2.3, 3.3.2).
+
+> *Engineering note: this Instance-stacking model was validated against a comparable idle-engine's actual `BigNumber`/tick-loop implementation before being locked, specifically to confirm never-freeze was computationally sound rather than assumed. Findings: per-tick cost is dominated by tick rate, not Instance count, at any realistic accumulation rate; the real risk is architectural (an accidental scan-cost that grows with Instance count), not raw scale — hence the strict O(1)-per-Instance requirement above. This whole system is explicitly flagged for revisiting after AXIOM is built and playtested, in case real numbers behave differently than modeled.*
+
+#### 3.7.4 Content: Sophistication Tiers and Rule-Sets
+
+AXIOM's content progression mirrors "Precision as Progression" (§3, main renderer) — a real, tiered technique progression rather than invented flavor:
+
+1. **Deterministic, context-free** (D0L) — base tier. Koch snowflake, Sierpinski gasket, dragon curve, classic botanical rule-sets (ferns, simple branching trees).
+2. **Context-sensitive** — unlocks rule-sets where a symbol's replacement depends on its neighbors, genuinely required for certain curves (Hilbert curve, Peano curve, Gosper curve).
+3. **Stochastic** — randomized rule selection at each rewrite step, more organic, less rigidly repeating variation.
+4. **Parametric** — numeric parameters attached to symbols, the real technique behind realistic botanical growth modeling.
+
+Each tier is purchased with Symbols; individual rule-sets within an unlocked tier are **separately purchasable** with Symbols (not bundled with the tier purchase). **Rule-set selection happens once, at Fork, and is locked for that Instance's entire lifetime** (mirroring Region selection at Reformat, 3.4.1 — no mid-run switching).
+
+#### 3.7.5 Presets
+
+A **Preset** is a specific, discovered parameter tuning within an already-unlocked rule-set — distinct from the rule-set itself, which is purchased, not discovered. Presets are only discoverable while their originating rule-set is currently active; once discovered, a Preset is a **permanent, global unlock**, available in any future Instance using that rule-set (mirroring Landmark permanence, 3.4.2). Discovery mechanism deferred — see the note following this section.
+
+#### 3.7.6 Bridge to the Main Game
+
+* **First main-game-crossing unlock:** a single, small grant of **Residual Checksums** (Tier 1 currency) — the earliest, most legible payoff available.
+* **Subsequent crossing unlocks:** modest, percentage-scale nudges to existing main-game systems, purchased with Symbols, interleaved with further AXIOM-only upgrades. Firm rule: AXIOM should almost never introduce a wholly new mechanic into the main game.
+
+**Still undecided:**
+
+* Exact compounding formula (3.7.3) and generation-advancement cost curve (3.7.2) — deferred alongside 3.2.3/3.3.2.
+* Full node list of purchasable rule-sets per tier, and their Symbol costs.
+* Preset discovery mechanism (see following deferred note).
 
 <!-- Parameter-tweaking discovery hook: deferred, not decided. Two non-exclusive
 approaches under consideration -- (A) a pre-curated pool of known-interesting
@@ -582,9 +626,9 @@ Structure likely one tree per fractal family, or a shared meta-tree plus per-fam
 
 Covers AI Navigator automation tiers (3.4.3: random search → smart neighboring-cell search → direct pathing) and Drone purchases (3.5: additional concurrent Julia Set dives). Currently described only as prose progression stages, not as tree nodes.
 
-### 4.5 Idle Garden Tree (WIP)
+### 4.5 AXIOM Tree (WIP)
 
-Funded by the garden's own internal currency (name TBD, 3.7). Per 3.7's firm rule, this tree should never introduce wholly new mechanics — only garden-only upgrades and modest percentage-scale nudges to existing main-game systems.
+Funded by Symbols (3.7.2). Per 3.7.6's firm rule, this tree should never introduce wholly new mechanics into the main game — only AXIOM-only upgrades (generation-rate, sophistication tiers, individual rule-sets, 3.7.4) and modest percentage-scale nudges to existing main-game systems.
 
 ### 4.6 Between-Tier Feature Trees (WIP)
 
@@ -663,18 +707,23 @@ Introducing a new *name* for a resource, currency, or unlock — even where the 
 
 ### 8.2 Glossary
 
+* **AXIOM:** Onboard diagnostic/testbed software SPIRAL runs to calibrate rendering techniques via Lindenmayer-system (L-system) fractals — a structurally separate progression system from the main i-Space loop. See 3.7.
 * **Calculated States** ("States" in UI): The central resource of the game, these are high-density, compressed snapshots of every state of i-Space captured by SPIRAL.
 * **Computational Complexity** A function of max iterations and precision digits, this value corresponds to the computing power required to zoom into this level.
 * **Compute:**  Powers the ship, allowing the SPIRAL to reach ever increasing depths into imaginary space.
 * **Derivative States** ("Derivatives" in UI): The isolated-pool currency earned during a Julia Set dive (see 3.5). Named for its mathematical relationship to the parent Mandelbrot coordinate that seeds the dive.
 * **Drone:** An autonomous exploratory unit dispatched to conduct a Julia Set dive independently of, and concurrently with, the main SPIRAL run. SPIRAL ships with one Drone by default; additional Drones are purchasable.
 * **Hilbert Buffer:** The Hilbert Buffer is a containment field that holds suspended Calculated States. When the processing grid solves an exponential fractal equation, that finalized data is compressed and beamed into the ship's buffer, acting as a hyper-dense power fuel.
+* **Fork:** The player-triggered internal prestige action within AXIOM (3.7). Non-destructive — creates a new Instance without discarding the previous one.
 * **i-Space**: Imaginary Space, or the imaginary plane. This is the realm that
 SPIRAL was built to explore; it is the space where fractals live.
+* **Instance:** A single, complete AXIOM session, created by a Fork, with its own Generation count and selected rule-set. Previous Instances are never discarded when a new one is created. See 3.7.3.
 * **Landmark:** A unique, individually discovered coordinate found while descending into a Region. Distinct from a Region itself.
+* **Nesting Depth:** The count of currently stacked AXIOM Instances; drives an automatic, cascading compounding effect rather than a spendable currency. See 3.7.3.
 * **Processing grid:** The distributed grid of Compute generators that provides Compute to the SPIRAL. Everything from your early-game CPU Cores to your late-game Dyson Cores and Matrioshka Brains contribute to this.
 * **Reformat:** The Tier 1 prestige action (see 3.6.1). Resets the Hilbert Buffer and returns to Zoom 0, in exchange for Residual Checksums.
 * **Region:** One of a fixed set of selectable zoom-0 destinations (e.g. Seahorse Valley, Antenna) chosen at each Reformat. See 3.4.
 * **Residual Checksums** ("Checksums" in UI): The permanent Tier 1 prestige currency, earned via Reformat. See 3.6.1.
 * **SPIRAL:** **S**patial **P**hase **I**teration & **R**esolution **A**nalysis **L**aboratory — An inter-dimensional exploratory ship designed specifically to plumb the depths of imaginary space.
+* **Symbols:** The single currency earned and spent within AXIOM (3.7); named for the L-system term for members of its rewrite alphabet.
 * **Tachyon Data Beams:** The transmission medium in which Calculated States are emitted to the SPIRAL when they are not computed by onboard processors.
