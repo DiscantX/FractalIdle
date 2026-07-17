@@ -2,6 +2,7 @@ import type { SettingDefinition, SettingSectionDefinition } from './types';
 
 export const SECTIONS: SettingSectionDefinition[] = [
   { id: 'canvas', title: 'Canvas' },
+  { id: 'fractal', title: 'Fractal' },
   { id: 'rendering', title: 'Rendering' },
   { id: 'zoom', title: 'Zoom' },
   { id: 'color-palette', title: 'Color palette' },
@@ -33,6 +34,17 @@ export const coreSettings: SettingDefinition[] = [
     onChange: (_value, api) => {
       api.syncCanvasSize();
      },
+  },
+
+  // --- Fractal ---
+  {
+    id: 'fractalType', kind: 'select', label: 'Fractal type', section: 'fractal', default: 'mandelbrot', rerender: true,
+    options: [
+      { value: 'mandelbrot', label: 'Mandelbrot' },
+      { value: 'julia', label: 'Julia' },
+      { value: 'burning-ship', label: 'Burning Ship' },
+      { value: 'buffalo', label: 'Buffalo' },
+    ],
   },
 
   // --- Rendering ---

@@ -1,4 +1,4 @@
-import { ChunkMode, ColorMode, PaletteName, ColorSpace, ViewState, TileTask, WorkerResponse } from '../types';
+import { ChunkMode, ColorMode, PaletteName, ColorSpace, ViewState, TileTask, WorkerResponse, FractalType } from '../types';
 import { settingsEngine } from '../settings/instance';
 import { state, renderContext } from '../state';
 import { drawingContext } from '../ui/dom';
@@ -8,6 +8,13 @@ export const renderCallbacks = {
   onRenderStart: (_renderId: number) => {},
   onRenderComplete: (_view: ViewState, _lastRenderMs: number, _totalSteps: number) => {},
   onRenderCancel: () => {},
+};
+
+const fractalWorkerMap: Record<FractalType, string> = {
+  mandelbrot: '../workers/mandelbrot/worker.ts',
+  julia: '../workers/julia/worker.ts',
+  'burning-ship': '../workers/burning-ship/worker.ts',
+  buffalo: '../workers/buffalo/worker.ts',
 };
 
 export function terminateWorkers() {
@@ -56,6 +63,7 @@ export function renderFrame(renderId: number, focalX?: number, focalY?: number) 
   const gridColumns = settingsEngine.getValue('gridColumns') as number;
   const gridRows = settingsEngine.getValue('gridRows') as number;
   const workerCountSetting = settingsEngine.getValue('workerCount') as number;
+  const fractalType = settingsEngine.getValue('fractalType') as FractalType;
   const solidGuessing = settingsEngine.getValue('solidGuessing') as boolean;
   const geometricCulling = settingsEngine.getValue('geometricCulling') as boolean;
   const periodicityChecking = settingsEngine.getValue('periodicityChecking') as boolean;
@@ -218,7 +226,7 @@ export function renderFrame(renderId: number, focalX?: number, focalY?: number) 
   };
 
   for (let i = 0; i < workerCount; i += 1) {
-    const worker = new Worker(new URL('../mandelbrot-worker.ts', import.meta.url), { type: 'module' });
+    const worker = new Worker(new URL(fractalWorkerMap[fractalType], import.meta.url), { type: 'module' });
     renderContext.activeWorkers.push(worker);
 
     worker.onmessage = (event: MessageEvent<WorkerResponse>) => {
