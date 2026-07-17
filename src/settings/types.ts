@@ -60,7 +60,28 @@ export interface SelectSetting extends SettingBase<string> {
     options: Array<{ value: string; label: string }>;
 }
 
-export type SettingDefinition = SliderSetting | NumberSetting | CheckboxSetting | SelectSetting;
+/**
+ * Escape hatch for controls that don't fit the "one value + one input" model —
+ * e.g. a row of transport buttons or a scrubber. It carries no settings-state
+ * value of its own; it renders whatever DOM it wants and drives side effects
+ * directly through the change API (or an external service). See the color
+ * animation controls in the registry.
+ */
+export interface CustomSetting {
+    kind: 'custom';
+    id: string;
+    section: string;
+    /** Optional heading rendered above the custom control. */
+    label?: string;
+    /** Builds the control's DOM. Called once at mount time. */
+    render: (api: SettingChangeApi) => HTMLElement;
+    visibleWhen?: (settings: SettingsState) => boolean;
+}
+
+/** Every kind except `custom` owns a value in settings state. */
+export type ValueSettingDefinition = SliderSetting | NumberSetting | CheckboxSetting | SelectSetting;
+
+export type SettingDefinition = ValueSettingDefinition | CustomSetting;
 
 export interface SettingSectionDefinition {
     id: string;

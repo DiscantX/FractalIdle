@@ -260,6 +260,34 @@ button:hover {
   flex: 1;
 }
 
+/* Color animation transport (custom settings control) */
+.anim-controls {
+  display: grid;
+  gap: 0.5rem;
+  margin-top: 0.25rem;
+}
+
+.anim-buttons {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.anim-buttons button {
+  flex: 1;
+}
+
+.anim-buttons button.is-playing {
+  background: #dc2626;
+}
+
+.anim-buttons button.is-playing:hover {
+  background: #b91c1c;
+}
+
+.anim-scrubber {
+  width: 100%;
+}
+
 .stats-card {
   margin-top: 1rem;
   padding: 0.85rem;

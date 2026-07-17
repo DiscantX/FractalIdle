@@ -12,11 +12,13 @@ import {
   putScalarTile,
   getTile,
   assembleScalarField,
+  assembleUniformColorViewport,
   getCurrentColorSignature,
   getCurrentColorParams,
   keyFor,
   getRenderSignature,
 } from './tile-cache';
+import { isAnimationPlaying } from './color-animation';
 import { computeTargetView } from './zoom-manager';
 
 export const renderCallbacks = {
@@ -203,6 +205,16 @@ export function terminateWorkers() {
   poolFractalType = null;
 }
 
+// True while a render is dispatched and still resolving tiles. The deep-dive
+// driver uses this to pace its prefetch: it must NOT fire a new render every
+// frame (each requestRender bumps activeRenderId, which drops the previous
+// render's in-flight tiles as stale — so at 60fps nothing would ever finish
+// computing). Instead it waits for the current render to drain before aiming the
+// next one at the now-deeper view.
+export function isRenderActive(): boolean {
+  return activeRender !== null;
+}
+
 export function cancelActiveRender() {
   markDebug('render:cancel-active', {
     workerCount: poolWorkers.length,
@@ -236,6 +248,19 @@ export function updatePanPreview() {
 
   const width = settingsEngine.getValue('width') as number;
   const height = settingsEngine.getValue('height') as number;
+
+  // While the color animation is playing, render the whole frame from the scalar
+  // tiles in ONE hue pass instead of compositing cached color tiles — this keeps
+  // the frame uniformly colored as it pans (rather than showing per-tile hues
+  // frozen at their last colorize). Falls back to the normal path if nothing is
+  // cached yet for this view.
+  if (isAnimationPlaying() && paintUniformColorFrame(state.view)) {
+    if (!renderContext.panRenderScheduled) {
+      renderContext.panRenderScheduled = true;
+      requestRender();
+    }
+    return;
+  }
 
   // Clear to placeholder, then build the frame in two layers:
   //  1. Base: the nearest OTHER cached zoom level, scaled to this view, filling
@@ -315,14 +340,17 @@ export function cheapRecolorRepaint(): void {
 let recolorScratch: ImageData | null = null;
 
 /**
- * The actual recolor. If the captured base scalar frame is still valid for the
- * current view, run Stage 2 (colorizeScalarFieldInto) over it directly — no
- * workers, no cache wipe. Falls back to a full render when the view has changed
- * since the base frame was captured (e.g. a mid/post-pan slider change).
+ * Colorize the captured base scalar frame with the CURRENT color params and blit
+ * it straight to the canvas — no cache interaction, no worker dispatch. This is
+ * the hot path shared by the cheap recolor and the color-animation loop: it
+ * deliberately does NOT touch the tile cache, so an animation changing the hue
+ * every frame doesn't thrash the Tier-2 color cache (see the animation note in
+ * color-stage-split-handoff.md).
+ *
+ * Returns false (painting nothing) when the base frame is missing or no longer
+ * valid for the live view — the caller decides whether to fall back to a render.
  */
-function performRecolor(): void {
-  // Keep the derived Tier-2 color cache from holding stale, now-unkeyed canvases.
-  ensureSignatureCurrent();
+export function paintBaseScalarFrame(): boolean {
   const base = renderContext.baseScalarField;
   const width = settingsEngine.getValue('width') as number;
   const height = settingsEngine.getValue('height') as number;
@@ -333,18 +361,52 @@ function performRecolor(): void {
     base.view.zoom === state.view.zoom &&
     base.canvasWidth === width &&
     base.canvasHeight === height;
-  if (viewMatches && base) {
-    const params = getCurrentColorParams();
-    if (
-      !recolorScratch ||
-      recolorScratch.width !== base.width ||
-      recolorScratch.height !== base.height
-    ) {
-      recolorScratch = new ImageData(base.width, base.height);
-    }
-    colorizeScalarFieldInto(base.data, base.width, base.height, base.maxIterations, params, recolorScratch);
-    drawingContext.putImageData(recolorScratch, Math.round(base.sx0), Math.round(base.sy0));
-    markDebug('render:cheap-recolor', { width: base.width, height: base.height });
+  if (!viewMatches || !base) return false;
+
+  const params = getCurrentColorParams();
+  if (
+    !recolorScratch ||
+    recolorScratch.width !== base.width ||
+    recolorScratch.height !== base.height
+  ) {
+    recolorScratch = new ImageData(base.width, base.height);
+  }
+  colorizeScalarFieldInto(base.data, base.width, base.height, base.maxIterations, params, recolorScratch);
+  drawingContext.putImageData(recolorScratch, Math.round(base.sx0), Math.round(base.sy0));
+  return true;
+}
+
+/**
+ * Colorize the WHOLE visible frame at the current view and hue in a single pass,
+ * assembling the nearest cached scalar level and coloring it uniformly. This is
+ * the general present path used during color animation / deep-dive where the
+ * view may be mid-zoom (not aligned to a cached level), so it scales the nearest
+ * cached tier-1 scalar tiles rather than relying on the exact-view base frame.
+ * Returns false when nothing is cached yet, so the caller can fall back to its
+ * normal (Tier-2) path for that frame.
+ */
+export function paintUniformColorFrame(view: ViewState = state.view): boolean {
+  const width = settingsEngine.getValue('width') as number;
+  const height = settingsEngine.getValue('height') as number;
+  const params = getCurrentColorParams();
+  const canvas = assembleUniformColorViewport(view, width, height, params);
+  if (!canvas) return false;
+  drawingContext.imageSmoothingEnabled = true;
+  drawingContext.drawImage(canvas, 0, 0);
+  return true;
+}
+
+/**
+ * The actual recolor. If the captured base scalar frame is still valid for the
+ * current view, run Stage 2 over it directly — no workers, no cache wipe. Falls
+ * back to a full render when the view has changed since the base frame was
+ * captured (e.g. a mid/post-pan slider change).
+ */
+function performRecolor(): void {
+  // Keep the derived Tier-2 color cache from holding stale, now-unkeyed canvases.
+  ensureSignatureCurrent();
+  if (paintBaseScalarFrame()) {
+    markDebug('render:cheap-recolor', {});
   } else {
     requestRender();
   }

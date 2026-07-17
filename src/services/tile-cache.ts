@@ -1,7 +1,7 @@
 import { ViewState, ColorParams } from '../types';
 import { settingsEngine } from '../settings/instance';
 import { markDebug } from '../utils/debug';
-import { renderScalarTileToCanvas } from '../utils/color';
+import { renderScalarTileToCanvas, colorizeScalarField } from '../utils/color';
 
 export type TileCanvas = HTMLCanvasElement;
 
@@ -703,6 +703,128 @@ export function assembleBestCachedViewport(
   const bestZoom = pickBestCachedZoom(view, width, height, opts);
   if (bestZoom === null) return null;
   return assembleScaledViewport(view, width, height, bestZoom);
+}
+
+// --- Uniform-color (single-hue) viewport assembly -------------------------
+// Like assembleScaledViewport, but at Stage 1: read the raw scalar tiles of the
+// best cached level into one Float32Array (no color yet), so a single colorize
+// pass can color the WHOLE frame at one hue. This is what lets a moving hue stay
+// uniform across the entire viewport during animation — see AssembledScalarAtZoom
+// below and the color-animation / deep-dive paths that use it.
+export type AssembledScalarAtZoom = {
+  data: Float32Array; // native-res scalar field (candidateZoom tile grid)
+  nativeW: number;
+  nativeH: number;
+  maxIterations: number;
+  // Screen placement of the native buffer within the target `width×height` frame
+  // (computed exactly like assembleScaledViewport's drawImage call), so the
+  // caller can scale-blit it into the right spot.
+  screenX: number;
+  screenY: number;
+  drawW: number;
+  drawH: number;
+};
+
+export function assembleScalarAtZoom(
+  view: ViewState,
+  width: number,
+  height: number,
+  candidateZoom: number,
+): AssembledScalarAtZoom | null {
+  const computeSig = computeComputeSignature();
+  const { scaleRe, scaleIm } = scaleForView(view, width, height);
+  const r = candidateTileRange(view, width, height, candidateZoom);
+  const maxIterations = settingsEngine.getValue('maxIterations') as number;
+
+  const data = new Float32Array(r.numTilesX * r.tw * r.numTilesY * r.th);
+  let covered = 0;
+  for (let j = 0; j < r.numTilesY; j += 1) {
+    for (let i = 0; i < r.numTilesX; i += 1) {
+      const key = keyFor(computeSig, candidateZoom, r.colStart + i, r.rowStart + j);
+      const tile = scalarCache.get(key);
+      if (tile) {
+        for (let ty = 0; ty < r.th; ty += 1) {
+          const srcOff = ty * r.tw;
+          const dstOff = (j * r.th + ty) * (r.numTilesX * r.tw) + i * r.tw;
+          for (let tx = 0; tx < r.tw; tx += 1) {
+            data[dstOff + tx] = tile.data[srcOff + tx];
+          }
+        }
+        covered += 1;
+      }
+    }
+  }
+  if (covered === 0) return null;
+
+  const screenX = (r.colStart * r.tileWorldW - (view.centerRe - (width / 2) * scaleRe)) / scaleRe;
+  const screenY = (r.rowStart * r.tileWorldH - (view.centerIm - (height / 2) * scaleIm)) / scaleIm;
+  const drawW = (r.numTilesX * r.tileWorldW) / scaleRe;
+  const drawH = (r.numTilesY * r.tileWorldH) / scaleIm;
+
+  return {
+    data,
+    nativeW: r.numTilesX * r.tw,
+    nativeH: r.numTilesY * r.th,
+    maxIterations,
+    screenX,
+    screenY,
+    drawW,
+    drawH,
+  };
+}
+
+/**
+ * Assemble a `width×height` canvas depicting `view` from the nearest cached zoom
+ * level, but colorized in a SINGLE pass at `params` — so the whole frame shares
+ * one hue (no per-tile/per-layer hue mismatch while the color is animating).
+ * Returns null when no cached level covers the viewport, so callers fall back to
+ * their existing behavior.
+ *
+ * Level selection requires near-FULL coverage (not just the nearest level): a
+ * partially-rendered level would leave uncovered tiles that colorize to the
+ * palette's zero color (black on viridis) — the "black chunks" during a dive. By
+ * demanding full coverage, pickBestCachedZoom skips a half-done exact level and
+ * falls back to a complete (if softer, upscaled) shallower level, so every frame
+ * is gap-free; it sharpens to the exact level once that finishes computing. We do
+ * NOT exclude the current zoom — the exact level is the preferred pick once ready.
+ */
+export function assembleUniformColorViewport(
+  view: ViewState,
+  width: number,
+  height: number,
+  params: ColorParams,
+): HTMLCanvasElement | null {
+  const bestZoom = pickBestCachedZoom(view, width, height, {
+    depthMode: 'unlimited',
+    maxOctaves: 32,
+    minCoverage: 0.999,
+  });
+  if (bestZoom === null) return null;
+  const scalar = assembleScalarAtZoom(view, width, height, bestZoom);
+  if (!scalar) return null;
+
+  const native = document.createElement('canvas');
+  native.width = scalar.nativeW;
+  native.height = scalar.nativeH;
+  const nctx = native.getContext('2d');
+  if (!nctx) return null;
+  const img = colorizeScalarField(scalar.data, scalar.nativeW, scalar.nativeH, scalar.maxIterations, params);
+  nctx.putImageData(img, 0, 0);
+
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return null;
+  ctx.imageSmoothingEnabled = true;
+  ctx.drawImage(
+    native,
+    Math.round(scalar.screenX),
+    Math.round(scalar.screenY),
+    Math.round(scalar.drawW),
+    Math.round(scalar.drawH),
+  );
+  return canvas;
 }
 
 // --- Base scalar-frame capture ----------------------------------------------

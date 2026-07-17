@@ -5,6 +5,8 @@ import { clamp } from '../utils/math';
 import { markDebug } from '../utils/debug';
 import { settingsEngine } from '../settings/instance';
 import { assembleBestCachedViewport } from './tile-cache';
+import { paintUniformColorFrame } from './renderer';
+import { isAnimationPlaying } from './color-animation';
 
 function getWidth(): number {
   return settingsEngine.getValue('width') as number;
@@ -253,6 +255,27 @@ export function beginSmoothZoom(factor: number, screenX: number, screenY: number
 
     state.view = computeTargetView(currentScale, animation.originX, animation.originY, animation.from);
     zoomCallbacks.onViewUpdate(); // keep the coordinate read-out in sync live
+
+    // While the color animation is playing, draw the whole frame from scalar tiles
+    // in ONE hue pass so the zooming frame stays uniformly colored (instead of
+    // compositing the RGB preview snapshot + cached tiles, which would each carry
+    // a different — and stale — hue). Falls back to the normal preview path if the
+    // cache doesn't yet cover this view.
+    if (isAnimationPlaying() && paintUniformColorFrame(state.view)) {
+      if (progress < 1) {
+        animation.frameId = requestAnimationFrame(step);
+      } else {
+        if (renderContext.zoomAnimationGeneration === animationToken) {
+          state.view = animation.to;
+          state.zoomAnimation = null;
+          markDebug('zoom:smooth-end', {
+            targetZoom: Number(animation.to.zoom.toPrecision(8)),
+          });
+          zoomCallbacks.onZoomEnd(animation.originX, animation.originY); // presents the destination render
+        }
+      }
+      return;
+    }
 
     if (progress === 0 || progress === 1 || progress < 0.08 || progress > 0.92) {
       markDebug('zoom:smooth-frame', {

@@ -1,5 +1,6 @@
 import type { SettingDefinition, SettingSectionDefinition } from './types';
 import { cheapRecolorRepaint } from '../services/renderer';
+import { renderAnimationControls } from '../ui/animation-controls';
 
 export const SECTIONS: SettingSectionDefinition[] = [
   { id: 'canvas', title: 'Canvas' },
@@ -11,6 +12,7 @@ export const SECTIONS: SettingSectionDefinition[] = [
   { id: 'color-palette', title: 'Color palette' },
   { id: 'palette-range', title: 'Palette range' },
   { id: 'adjust-colors', title: 'Adjust colors' },
+  { id: 'color-animation', title: 'Color animation' },
 ];
 
 export const coreSettings: SettingDefinition[] = [
@@ -221,5 +223,25 @@ export const coreSettings: SettingDefinition[] = [
       { value: 'hsl', label: 'HSL' }, { value: 'hsluv', label: 'HSLuv' },
       { value: 'lch', label: 'LCh' }, { value: 'okhsl', label: 'Okhsl' },
     ],
+  },
+
+  // --- Color animation ---
+  {
+    id: 'animationType', kind: 'select', label: 'Animation', section: 'color-animation', default: 'hue-cycle', rerender: false,
+    options: [
+      { value: 'hue-cycle', label: 'Hue Cycle' },
+    ],
+  },
+  {
+    id: 'animationSpeed', kind: 'slider', label: 'Speed (cycles/sec)', section: 'color-animation',
+    default: 0.2, min: 0.01, max: 2, step: 0.01, rerender: false, format: (v) => v.toFixed(2),
+  },
+  {
+    id: 'deepDiveZoomSpeed', kind: 'slider', label: 'Deep-dive speed (octaves/sec)', section: 'color-animation',
+    default: 0.5, min: 0.05, max: 4, step: 0.05, rerender: false, format: (v) => v.toFixed(2),
+  },
+  {
+    id: 'animationControls', kind: 'custom', section: 'color-animation',
+    render: (_api) => renderAnimationControls(_api),
   },
 ];

@@ -1,4 +1,4 @@
-import type { SettingDefinition, SettingsState, SettingChangeApi, SettingValue } from './types';
+import type { SettingDefinition, ValueSettingDefinition, SettingsState, SettingChangeApi, SettingValue } from './types';
 import { SECTIONS, coreSettings } from './registry';
 import { enforceRangeLink } from './rangeLink';
 
@@ -26,6 +26,8 @@ export class SettingsEngine {
     this.registry = registry;
     this.state = {};
     for (const setting of registry) {
+      // Custom controls carry no settings-state value of their own.
+      if (setting.kind === 'custom') continue;
       this.state[setting.id] = setting.default;
     }
   }
@@ -65,6 +67,21 @@ export class SettingsEngine {
   }
 
   private buildField(setting: SettingDefinition): HTMLElement {
+    // Custom controls render their own DOM and manage their own side effects;
+    // they don't participate in the value/commit machinery below.
+    if (setting.kind === 'custom') {
+      const wrapper = document.createElement('div');
+      wrapper.className = 'control-field';
+      this.fieldWrappers.set(setting.id, wrapper);
+      if (setting.label) {
+        const span = document.createElement('span');
+        span.textContent = setting.label;
+        wrapper.appendChild(span);
+      }
+      wrapper.appendChild(setting.render(this.api));
+      return wrapper;
+    }
+
     const wrapper = document.createElement('label');
     wrapper.className = setting.kind === 'checkbox' ? 'control-field inline-field' : 'control-field';
     this.fieldWrappers.set(setting.id, wrapper);
@@ -138,7 +155,7 @@ export class SettingsEngine {
     return wrapper;
   }
 
-  private commitChange(setting: SettingDefinition, value: SettingValue): void {
+  private commitChange(setting: ValueSettingDefinition, value: SettingValue): void {
     this.state[setting.id] = value;
     this.syncControlDisplay(setting.id);
 
@@ -147,7 +164,9 @@ export class SettingsEngine {
     if (setting.rangeLink) {
       const correction = enforceRangeLink(value as number, setting.rangeLink, this.state);
       if (correction) {
-        const pairedSetting = this.registry.find((s) => s.id === correction.id);
+        const pairedSetting = this.registry.find(
+          (s): s is ValueSettingDefinition => s.id === correction.id,
+        );
         this.state[correction.id] = correction.value;
         this.syncControlDisplay(correction.id);
         if (pairedSetting?.rerender) shouldRerender = true;
