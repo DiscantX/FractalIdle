@@ -11,6 +11,7 @@ import {
   updateStats,
   updateRenderStatus,
   updateLogCountText,
+  updateNavigatorReadout,
 } from './ui/ui-manager';
 
 // Link renderer callbacks to UI updates and frame caching
@@ -60,6 +61,13 @@ zoomCallbacks.onZoomEnd = (focalX, focalY) => {
   if (!promoteActiveRenderToPresent()) {
     requestRender(focalX, focalY);
   }
+};
+
+// Keep the navigator's coordinate read-out in sync with the live view on every
+// view change (smooth-zoom frames, instant zooms, jumps, resets), not only when
+// a render finishes.
+zoomCallbacks.onViewUpdate = () => {
+  updateNavigatorReadout(true);
 };
 
 // Link log persistence events to UI counters

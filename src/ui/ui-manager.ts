@@ -6,6 +6,7 @@ import {
   beginSmoothZoom,
   applyZoom,
   resetView,
+  jumpTo,
   getWheelZoomFactor,
   getClickZoomFactor,
 } from '../services/zoom-manager';
@@ -20,12 +21,20 @@ import {
   activeIterationsOutput,
   stepOutput,
   renderButton,
-  resetButton,
   exportLogsButton,
   benchmarkButton,
   renderStatusDot,
   renderStatusText,
   renderStatusTimer,
+  navCard,
+  navSentinel,
+  navReInput,
+  navImInput,
+  navZoomInput,
+  navJumpButton,
+  navOriginButton,
+  navCopyButton,
+  navPasteButton,
 } from './dom';
 
 function getWidth(): number {
@@ -45,6 +54,133 @@ export function updateStats() {
   zoomOutput.textContent = `${state.view.zoom.toFixed(2)}×`;
   activeIterationsOutput.textContent = `${settingsEngine.getValue('maxIterations')}`;
   stepOutput.textContent = `${state.lastSteps.toLocaleString()}`;
+  updateNavigatorReadout();
+}
+
+// Full-precision string for a coordinate. Doubles carry ~15-16 significant
+// digits; toString() emits them without trailing noise, which is exactly the
+// "long" value users want to read/copy at deep zoom.
+function formatCoord(value: number): string {
+  return Number.isFinite(value) ? String(value) : '';
+}
+
+// Fields the user has typed into but not yet committed (via Jump/Origin/Enter).
+// A background render completing must NOT overwrite these — otherwise typing a
+// coordinate and clicking away (or clicking Jump) would reset the field before
+// it's used. Genuine view movement (pan/zoom) still forces a refresh.
+const navDirtyFields = new Set<HTMLInputElement>();
+
+function markNavFieldDirty(input: HTMLInputElement) {
+  navDirtyFields.add(input);
+}
+
+function syncNavField(input: HTMLInputElement, value: number, force: boolean) {
+  // Never write into the field under the caret, and skip user-edited fields
+  // unless the view genuinely moved (force).
+  if (document.activeElement === input) {
+    return;
+  }
+  if (navDirtyFields.has(input) && !force) {
+    return;
+  }
+  input.value = formatCoord(value);
+  input.classList.remove('nav-invalid');
+  navDirtyFields.delete(input);
+}
+
+// Mirror the live view into the navigator inputs. `force` (real view movement)
+// overrides pending edits; the default (render-complete) preserves them.
+export function updateNavigatorReadout(force = false) {
+  syncNavField(navReInput, state.view.centerRe, force);
+  syncNavField(navImInput, state.view.centerIm, force);
+  syncNavField(navZoomInput, state.view.zoom, force);
+}
+
+// Parse a single coordinate field. Marks the field invalid (and returns null)
+// when the value isn't a finite number, so Jump can bail without moving.
+function readCoordField(input: HTMLInputElement, opts: { positive?: boolean } = {}): number | null {
+  const parsed = Number.parseFloat(input.value.trim());
+  const ok = Number.isFinite(parsed) && (!opts.positive || parsed > 0);
+  input.classList.toggle('nav-invalid', !ok);
+  return ok ? parsed : null;
+}
+
+function performJump() {
+  const re = readCoordField(navReInput);
+  const im = readCoordField(navImInput);
+  const zoom = readCoordField(navZoomInput, { positive: true });
+  if (re === null || im === null || zoom === null) {
+    return;
+  }
+  navReInput.blur();
+  navImInput.blur();
+  navZoomInput.blur();
+  jumpTo(re, im, zoom);
+}
+
+async function copyCoordinates() {
+  const text = `${formatCoord(state.view.centerRe)}, ${formatCoord(state.view.centerIm)}, ${formatCoord(state.view.zoom)}`;
+  try {
+    await navigator.clipboard.writeText(text);
+    flashButton(navCopyButton, 'Copied');
+  } catch {
+    flashButton(navCopyButton, 'Failed');
+  }
+}
+
+// Pull the first three finite numbers out of arbitrary pasted text (tolerates
+// labels, parens, and scientific notation) and load them into the inputs. This
+// only stages the coordinates — the user still has to press Jump to travel.
+async function pasteCoordinates() {
+  let text = '';
+  try {
+    text = await navigator.clipboard.readText();
+  } catch {
+    flashButton(navPasteButton, 'Failed');
+    return;
+  }
+  const matches = text.match(/-?\d+\.?\d*(?:[eE][-+]?\d+)?/g) ?? [];
+  const nums = matches.map(Number).filter((n) => Number.isFinite(n));
+  if (nums.length < 3 || !(nums[2] > 0)) {
+    flashButton(navPasteButton, 'Bad data');
+    return;
+  }
+  // Stage into the fields and mark them edited so live view updates don't
+  // overwrite them before the user commits with Jump.
+  navReInput.value = formatCoord(nums[0]);
+  navImInput.value = formatCoord(nums[1]);
+  navZoomInput.value = formatCoord(nums[2]);
+  [navReInput, navImInput, navZoomInput].forEach((input) => {
+    input.classList.remove('nav-invalid');
+    markNavFieldDirty(input);
+  });
+  // Hand focus to Jump so the user can commit with a single Enter/Space press
+  // instead of having to click the button (focus was on Paste until now).
+  navJumpButton.focus();
+}
+
+function flashButton(button: HTMLButtonElement, label: string) {
+  const original = button.textContent;
+  button.textContent = label;
+  window.setTimeout(() => {
+    button.textContent = original;
+  }, 1100);
+}
+
+// Toggle a shadow on the navigator once it pins to the top of the scrolling
+// sidebar. The zero-height sentinel sits just above the card; when it leaves the
+// panel's top edge the card is stuck.
+function initNavigatorSticky() {
+  if (typeof IntersectionObserver === 'undefined') {
+    return;
+  }
+  const observer = new IntersectionObserver(
+    ([entry]) => {
+      navCard.classList.toggle('is-stuck', !entry.isIntersecting);
+    },
+    { root: navCard.parentElement, threshold: 0 },
+  );
+  observer.observe(navSentinel);
 }
 
 export function formatRenderTimerValue(value: number) {
@@ -139,6 +275,7 @@ export function handlePointerMove(event: MouseEvent) {
   state.view.centerRe = dragState.startCenterRe - dx * scaleRe;
   state.view.centerIm = dragState.startCenterIm - dy * scaleIm;
   updatePanPreview();
+  updateNavigatorReadout(true); // live pan feedback overrides any pending edits
 }
 
 export function handlePointerUp() {
@@ -248,7 +385,6 @@ export function updateLogCountText(count: number) {
 
 export function wireControls() {
   renderButton.addEventListener('click', () => requestRender());
-  resetButton.addEventListener('click', () => resetView());
   exportLogsButton.addEventListener('click', () => exportLogs());
   benchmarkButton.addEventListener('click', () => runBenchmarkSweep());
 
@@ -257,4 +393,20 @@ export function wireControls() {
   window.addEventListener('mouseup', handlePointerUp);
   canvas.addEventListener('wheel', handleWheel, { passive: false });
   canvas.addEventListener('click', handleClick);
+
+  navJumpButton.addEventListener('click', () => performJump());
+  navOriginButton.addEventListener('click', () => resetView());
+  navCopyButton.addEventListener('click', () => copyCoordinates());
+  navPasteButton.addEventListener('click', () => pasteCoordinates());
+  [navReInput, navImInput, navZoomInput].forEach((input) => {
+    input.addEventListener('input', () => markNavFieldDirty(input));
+    input.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        performJump();
+      }
+    });
+  });
+
+  initNavigatorSticky();
 }

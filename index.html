@@ -4,15 +4,42 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Mandelbrot Scratchpad</title>
+  <title>Fractal Explorer</title>
   <link rel="stylesheet" href="/src/style.css" />
 </head>
 
 <body>
   <div class="app-shell">
     <aside class="controls-panel">
-      <h1>Mandelbrot Scratchpad</h1>
-      <p class="subtitle">Single-threaded proof of concept for canvas performance.</p>
+      <h1>Fractal Explorer</h1>
+      <p class="subtitle">Explore the complex plane in real time — pan, zoom, and jump to any coordinate.</p>
+
+      <div id="navSentinel" aria-hidden="true"></div>
+      <div id="coordNav" class="nav-card">
+        <div class="nav-card-header">
+          <span class="nav-card-title">Navigate</span>
+          <div class="nav-card-actions">
+            <button id="navCopyButton" type="button" class="nav-icon-button" title="Copy current coordinates">Copy</button>
+            <button id="navPasteButton" type="button" class="nav-icon-button" title="Paste coordinates and jump">Paste</button>
+          </div>
+        </div>
+        <div class="nav-field">
+          <label for="navReInput">Re</label>
+          <input id="navReInput" type="text" inputmode="decimal" spellcheck="false" autocomplete="off" />
+        </div>
+        <div class="nav-field">
+          <label for="navImInput">Im</label>
+          <input id="navImInput" type="text" inputmode="decimal" spellcheck="false" autocomplete="off" />
+        </div>
+        <div class="nav-field">
+          <label for="navZoomInput">Zoom</label>
+          <input id="navZoomInput" type="text" inputmode="decimal" spellcheck="false" autocomplete="off" />
+        </div>
+        <div class="nav-button-row">
+          <button id="navJumpButton" type="button">Jump</button>
+          <button id="navOriginButton" type="button" class="nav-secondary">Origin</button>
+        </div>
+      </div>
 
       <div id="settingsContainer"></div>
 
@@ -20,7 +47,6 @@
 
       <div class="button-row">
         <button id="renderButton" type="button">Render</button>
-        <button id="resetButton" type="button">Reset view</button>
       </div>
 
       <div class="button-row">

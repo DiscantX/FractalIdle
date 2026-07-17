@@ -32,6 +32,10 @@ export const zoomCallbacks = {
   // Fires when a smooth-zoom animation completes — used to present the
   // in-flight destination render (promoting it) rather than starting a new one.
   onZoomEnd: (_focalX?: number, _focalY?: number) => {},
+  // Fires whenever the live view changes (every smooth-zoom frame, each instant
+  // zoom) so the UI can refresh the coordinate read-out in real time — not only
+  // after a render completes.
+  onViewUpdate: () => {},
 };
 
 // Projects `sourceCanvas` (rendered for `sourceView`) into the frame for
@@ -248,6 +252,7 @@ export function beginSmoothZoom(factor: number, screenX: number, screenY: number
     const currentScale = 1 + (scaleRatio - 1) * eased;
 
     state.view = computeTargetView(currentScale, animation.originX, animation.originY, animation.from);
+    zoomCallbacks.onViewUpdate(); // keep the coordinate read-out in sync live
 
     if (progress === 0 || progress === 1 || progress < 0.08 || progress > 0.92) {
       markDebug('zoom:smooth-frame', {
@@ -325,7 +330,26 @@ export function applyZoom(factor: number, screenX: number, screenY: number) {
     targetZoom: Number(targetView.zoom.toPrecision(8)),
   });
   state.view = targetView;
+  zoomCallbacks.onViewUpdate(); // keep the coordinate read-out in sync live
   zoomCallbacks.onZoomChange(screenX, screenY); // triggers requestRender()
+}
+
+// Instantly relocate the view to an explicit coordinate/zoom (the navigator's
+// "Jump"). Cancels any in-flight smooth-zoom so the animation doesn't overwrite
+// the destination, then requests a fresh render.
+export function jumpTo(centerRe: number, centerIm: number, zoom: number) {
+  cancelZoomAnimation();
+  renderContext.lastZoomDir = 'none';
+  state.view.centerRe = centerRe;
+  state.view.centerIm = centerIm;
+  state.view.zoom = zoom;
+  markDebug('nav:jump', {
+    centerRe: Number(centerRe.toPrecision(12)),
+    centerIm: Number(centerIm.toPrecision(12)),
+    zoom: Number(zoom.toPrecision(8)),
+  });
+  zoomCallbacks.onViewUpdate(); // reflect the committed coordinates immediately
+  zoomCallbacks.onZoomChange(); // triggers requestRender()
 }
 
 export function resetView() {
@@ -336,6 +360,7 @@ export function resetView() {
   state.view.centerRe = defaultView.centerRe;
   state.view.centerIm = defaultView.centerIm;
   state.view.zoom = defaultView.zoom;
+  zoomCallbacks.onViewUpdate(); // reflect the reset coordinates immediately
   zoomCallbacks.onZoomChange(); // triggers requestRender()
 }
 
