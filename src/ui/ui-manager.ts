@@ -1,7 +1,7 @@
 import { BenchmarkCase } from '../types';
 import { state, dragState, renderContext } from '../state';
 import { settingsEngine } from '../settings/instance';
-import { requestRender } from '../services/renderer';
+import { requestRender, startPanPreview, updatePanPreview, endPanPreview } from '../services/renderer';
 import {
   beginSmoothZoom,
   applyZoom,
@@ -112,6 +112,7 @@ export function handlePointerDown(event: MouseEvent) {
   dragState.startCenterRe = state.view.centerRe;
   dragState.startCenterIm = state.view.centerIm;
   canvas.style.cursor = 'grabbing';
+  startPanPreview();
 }
 
 export function handlePointerMove(event: MouseEvent) {
@@ -137,12 +138,13 @@ export function handlePointerMove(event: MouseEvent) {
 
   state.view.centerRe = dragState.startCenterRe - dx * scaleRe;
   state.view.centerIm = dragState.startCenterIm - dy * scaleIm;
-  requestRender();
+  updatePanPreview();
 }
 
 export function handlePointerUp() {
   dragState.active = false;
   canvas.style.cursor = 'grab';
+  endPanPreview();
 }
 
 export function handleWheel(event: WheelEvent) {

@@ -215,22 +215,23 @@ export function renderFrame(renderId: number, focalX?: number, focalY?: number, 
   const queue: TileTask[] = [];
 
   if (region) {
-    // Incremental pan fill: only build tiles that intersect the exposed strip,
-    // so already-on-screen pixels (seeded from the current canvas below) are
-    // never recomputed. Force a grid regardless of chunkMode so we can filter.
+    // Incremental pan fill: build tiles strictly *inside* the exposed strip so
+    // already-on-screen pixels are never recomputed and never overwritten with
+    // stale content. Subdivide the strip into a grid for worker parallelism,
+    // but clip every tile to the region bounds.
     const columns = Math.max(1, gridColumns);
     const rows = Math.max(1, gridRows);
-    const chunkWidth = width / columns;
-    const chunkHeight = height / rows;
+    const regionWidth = region.x1 - region.x0;
+    const regionHeight = region.y1 - region.y0;
+    const chunkWidth = regionWidth / columns;
+    const chunkHeight = regionHeight / rows;
 
     for (let row = 0; row < rows; row += 1) {
-      const rowStart = Math.floor(row * chunkHeight);
-      const rowEnd = Math.min(height, Math.floor((row + 1) * chunkHeight));
+      const rowStart = region.y0 + Math.floor(row * chunkHeight);
+      const rowEnd = Math.min(region.y1, region.y0 + Math.floor((row + 1) * chunkHeight));
       for (let col = 0; col < columns; col += 1) {
-        const colStart = Math.floor(col * chunkWidth);
-        const colEnd = Math.min(width, Math.floor((col + 1) * chunkWidth));
-        if (colEnd <= region.x0 || colStart >= region.x1) continue;
-        if (rowEnd <= region.y0 || rowStart >= region.y1) continue;
+        const colStart = region.x0 + Math.floor(col * chunkWidth);
+        const colEnd = Math.min(region.x1, region.x0 + Math.floor((col + 1) * chunkWidth));
         queue.push({ rowStart, rowEnd, colStart, colEnd });
       }
     }
@@ -280,11 +281,11 @@ export function renderFrame(renderId: number, focalX?: number, focalY?: number, 
       return;
     }
 
-    // Keep the last completed frame as the pan base so successive pans can
-    // translate it instead of recomputing the whole canvas.
-    snapshotPanBase(imageData, renderView, width, height);
-
     if (!region) {
+      // Keep the last completed frame as the pan base so successive pans can
+      // translate it instead of recomputing the whole canvas.
+      snapshotPanBase(imageData, renderView, width, height);
+
       drawingContext.putImageData(imageData, 0, 0);
       state.lastRenderMs = performance.now() - start;
       state.lastSteps = totalSteps;
@@ -299,6 +300,14 @@ export function renderFrame(renderId: number, focalX?: number, focalY?: number, 
       }, renderId);
 
       renderCallbacks.onRenderComplete(renderView, state.lastRenderMs, totalSteps);
+    } else {
+      // Incremental pan fill: the live canvas now holds the composited frame
+      // (drag-translated base + just-filled strip). Adopt it as the pan base
+      // and sync the base view to the live view so the *next* drag move only
+      // exposes the strip revealed since this fill — no cumulative re-render.
+      // Re-open the scheduling gate so a follow-up strip can be requested.
+      snapshotPanBase(drawingContext.getImageData(0, 0, width, height), { ...state.view }, width, height);
+      renderContext.panRenderScheduled = false;
     }
   };
 
@@ -391,7 +400,23 @@ export function renderFrame(renderId: number, focalX?: number, focalY?: number, 
       periodicityShortCircuits += response.periodicityShortCircuits ?? 0;
 
       activeChunkCount -= 1;
-      drawingContext.putImageData(imageData, 0, 0);
+      if (region) {
+        // Incremental pan fill: paint only the tiles just computed onto the
+        // live canvas (dirty-rectangle form) instead of the whole frame. This
+        // preserves the drag-translated base and avoids jumping the view back
+        // to where the render was requested.
+        drawingContext.putImageData(
+          imageData,
+          0,
+          0,
+          response.colStart,
+          response.rowStart,
+          response.colEnd - response.colStart,
+          response.rowEnd - response.rowStart,
+        );
+      } else {
+        drawingContext.putImageData(imageData, 0, 0);
+      }
 
       if (completedChunks === 1 || completedChunks === totalChunks) {
         markDebug('render:tile-paint', {
