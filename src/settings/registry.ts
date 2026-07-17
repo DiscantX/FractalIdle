@@ -38,13 +38,18 @@ export const coreSettings: SettingDefinition[] = [
 
   // --- Fractal ---
   {
-    id: 'fractalType', kind: 'select', label: 'Fractal type', section: 'fractal', default: 'mandelbrot', rerender: true,
+    id: 'fractalType', kind: 'select', label: 'Fractal type', section: 'fractal', default: 'mandelbrot', rerender: false,
     options: [
       { value: 'mandelbrot', label: 'Mandelbrot' },
       { value: 'julia', label: 'Julia' },
       { value: 'burning-ship', label: 'Burning Ship' },
       { value: 'buffalo', label: 'Buffalo' },
     ],
+    // Switching fractal also recenters to that fractal's default view (which
+    // itself triggers the re-render), so we opt out of the automatic rerender.
+    onChange: (_value, api) => {
+      api.resetView();
+    },
   },
 
   // --- Rendering ---

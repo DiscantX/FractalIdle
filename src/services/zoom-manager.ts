@@ -1,5 +1,5 @@
-import { ViewState, CompletedFrame, ZoomAnimationState } from '../types';
-import { state, renderContext, PREVIEW_PLACEHOLDER_COLOR, MAX_COMPLETED_FRAME_CACHE } from '../state';
+import { ViewState, CompletedFrame, ZoomAnimationState, FractalType } from '../types';
+import { state, renderContext, PREVIEW_PLACEHOLDER_COLOR, MAX_COMPLETED_FRAME_CACHE, fractalDefaultViews } from '../state';
 import { canvas, drawingContext } from '../ui/dom';
 import { clamp } from '../utils/math';
 import { markDebug } from '../utils/debug';
@@ -282,9 +282,11 @@ export function applyZoom(factor: number, screenX: number, screenY: number) {
 
 export function resetView() {
   cancelZoomAnimation();
-  state.view.centerRe = 0;
-  state.view.centerIm = 0;
-  state.view.zoom = 1;
+  const fractalType = settingsEngine.getValue('fractalType') as FractalType;
+  const defaultView = fractalDefaultViews[fractalType];
+  state.view.centerRe = defaultView.centerRe;
+  state.view.centerIm = defaultView.centerIm;
+  state.view.zoom = defaultView.zoom;
   zoomCallbacks.onZoomChange(); // triggers requestRender()
 }
 

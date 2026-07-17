@@ -4,6 +4,7 @@ export type SettingsState = Record<string, SettingValue>;
 export interface SettingChangeApi {
     requestRender: () => void;
     syncCanvasSize: () => void;
+    resetView: () => void;
     getValue: (id: string) => SettingValue;
     setValue: (id: string, value: SettingValue) => void;
 }

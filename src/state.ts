@@ -1,8 +1,18 @@
-import { RenderState, DragState, CompletedFrame, RenderLogEntry, DebugEvent } from './types';
+import { RenderState, DragState, CompletedFrame, RenderLogEntry, DebugEvent, FractalType, ViewState } from './types';
 
 export const STORAGE_KEY = 'mandelbrot-render-logs';
 export const PREVIEW_PLACEHOLDER_COLOR = '#0f172a';
 export const MAX_COMPLETED_FRAME_CACHE = 24;
+
+// Sensible initial framing for each fractal type. Switching types (or hitting
+// the Reset View button) returns to these rather than a hardcoded origin so
+// the interesting region is on-screen immediately.
+export const fractalDefaultViews: Record<FractalType, ViewState> = {
+  mandelbrot: { centerRe: 0, centerIm: 0, zoom: 1 },
+  julia: { centerRe: 0, centerIm: 0, zoom: 1 },
+  'burning-ship': { centerRe: -0.5, centerIm: -0.5, zoom: 1 },
+  buffalo: { centerRe: -0.5, centerIm: -0.5, zoom: 1 },
+};
 
 export const state: RenderState = {
   view: {

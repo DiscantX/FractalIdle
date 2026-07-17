@@ -12,8 +12,10 @@
 import { SettingsEngine } from './engine';
 import { syncCanvasSize } from '../ui/ui-manager';
 import { requestRender } from '../services/renderer';
+import { resetView } from '../services/zoom-manager';
 
 export const settingsEngine = new SettingsEngine({
   requestRender: () => requestRender(),
   syncCanvasSize: () => syncCanvasSize(),
+  resetView: () => resetView(),
 });

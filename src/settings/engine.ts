@@ -5,6 +5,7 @@ import { enforceRangeLink } from './rangeLink';
 export interface SettingsEngineHost {
   requestRender: () => void;
   syncCanvasSize: () => void;
+  resetView: () => void;
 }
 
 type ControlRefs =
@@ -195,6 +196,7 @@ export class SettingsEngine {
   private readonly api: SettingChangeApi = {
     requestRender: () => this.host.requestRender(),
     syncCanvasSize: () => this.host.syncCanvasSize(),
+    resetView: () => this.host.resetView(),
     getValue: this.getValue,
     setValue: this.setValue,
   };
