@@ -1,4 +1,4 @@
-import { PaletteName, ColorSpace } from '../types';
+import { PaletteName, ColorSpace, ColorParams } from '../types';
 import { clamp01, lerp } from './math';
 
 export type Rgb = { r: number; g: number; b: number };
@@ -184,4 +184,192 @@ export function applyAdjustments(color: Rgb, hueShift: number, saturationScale: 
   }
 
   return hslToRgb(hue, saturation, lightness);
+}
+
+// --- Stage 2 (main-thread color stage) -------------------------------------
+// The worker now emits a per-pixel scalar field (valueForPalette). These
+// functions turn that field into final, palette-lookup + HSL-adjusted RGB on the
+// main thread. See color-stage-split-handoff.md.
+
+// Single pixel: scalar value -> final adjusted RGB. Mirrors the mapping the
+// workers used to do inline. `value` is valueForPalette (raw, pre-normalization;
+// palette-range normalization happens here). Interior test `value >= maxIterations`
+// is exact for escape-time / smooth modes (interior pixels are never smoothed).
+export function scalarToRgb(
+  value: number,
+  maxIterations: number,
+  p: ColorParams,
+): Rgb {
+  const isInterior = value >= maxIterations;
+  const minIt = p.autoAdjustColors ? 0 : Math.min(p.paletteMinIterations, p.paletteMaxIterations);
+  const maxIt = p.autoAdjustColors
+    ? Math.max(1, maxIterations)
+    : Math.max(1, Math.max(p.paletteMinIterations, p.paletteMaxIterations));
+  const palettePosition = clamp01((value - minIt) / Math.max(1, maxIt - minIt));
+
+  let color: Rgb;
+  if (p.colorMode === 'black-white') {
+    const gray = isInterior ? 0 : 255;
+    color = { r: gray, g: gray, b: gray };
+  } else if (p.palette === 'world-map') {
+    color = getWorldMapColor(value, maxIterations);
+  } else {
+    color = getPaletteColor(palettePosition, p.palette, p.reverseColors, p.colorCycles);
+  }
+  return applyAdjustments(color, p.hueShift, p.saturation, p.lightness, p.colorSpace);
+}
+
+// --- Color LUT (the fast path) ---------------------------------------------
+// Colorizing a full frame per pixel via scalarToRgb means ~1.19M rgbToHsl ->
+// adjust -> hslToRgb round-trips per repaint — far too slow for interactive
+// slider drags or animation. But every pixel's color is a pure function of a
+// single normalized parameter u in [0,1] (palettePosition, or value/maxIterations
+// for world-map), and the palette + adjustments are constant across the frame.
+// So we build a 1-D lookup table ONCE per repaint (4096 adjusted RGB entries),
+// then the per-pixel loop is just: normalize -> index -> copy. This turns the
+// expensive trig/HSL work from O(pixels) into O(4096), a ~5-10x speedup that
+// makes recoloring cheap enough to animate.
+
+const LUT_SIZE = 4096;
+
+type ColorLut = {
+  table: Uint8Array; // LUT_SIZE * 3, adjusted RGB per normalized position
+  mode: 'gradient' | 'world-map' | 'black-white';
+  minIt: number;
+  maxIt: number;
+  // black-white only: the two adjusted endpoints (interior/exterior).
+  bwInterior: Rgb;
+  bwExterior: Rgb;
+};
+
+export function buildColorLut(maxIterations: number, p: ColorParams): ColorLut {
+  const minIt = p.autoAdjustColors ? 0 : Math.min(p.paletteMinIterations, p.paletteMaxIterations);
+  const maxIt = p.autoAdjustColors
+    ? Math.max(1, maxIterations)
+    : Math.max(1, Math.max(p.paletteMinIterations, p.paletteMaxIterations));
+
+  let mode: ColorLut['mode'];
+  if (p.colorMode === 'black-white') mode = 'black-white';
+  else if (p.palette === 'world-map') mode = 'world-map';
+  else mode = 'gradient';
+
+  const table = new Uint8Array(LUT_SIZE * 3);
+  const n1 = LUT_SIZE - 1;
+  if (mode !== 'black-white') {
+    for (let i = 0; i < LUT_SIZE; i += 1) {
+      const u = i / n1;
+      const base = mode === 'world-map'
+        ? getWorldMapColor(u * maxIterations, maxIterations)
+        : getPaletteColor(u, p.palette, p.reverseColors, p.colorCycles);
+      const c = applyAdjustments(base, p.hueShift, p.saturation, p.lightness, p.colorSpace);
+      const o = i * 3;
+      table[o] = c.r;
+      table[o + 1] = c.g;
+      table[o + 2] = c.b;
+    }
+  }
+
+  const bwInterior = applyAdjustments({ r: 0, g: 0, b: 0 }, p.hueShift, p.saturation, p.lightness, p.colorSpace);
+  const bwExterior = applyAdjustments({ r: 255, g: 255, b: 255 }, p.hueShift, p.saturation, p.lightness, p.colorSpace);
+
+  return { table, mode, minIt, maxIt, bwInterior, bwExterior };
+}
+
+// Core hot loop: fill an RGBA buffer from a scalar field using a prebuilt LUT.
+// `out` must be at least w*h*4 long. Shared by the tile and full-frame paths.
+function fillRgbaFromLut(
+  scalar: Float32Array,
+  count: number,
+  maxIterations: number,
+  lut: ColorLut,
+  out: Uint8ClampedArray,
+): void {
+  const n1 = LUT_SIZE - 1;
+  const { table } = lut;
+
+  if (lut.mode === 'black-white') {
+    const inC = lut.bwInterior;
+    const exC = lut.bwExterior;
+    for (let i = 0; i < count; i += 1) {
+      const interior = scalar[i] >= maxIterations;
+      const c = interior ? inC : exC;
+      const o = i * 4;
+      out[o] = c.r;
+      out[o + 1] = c.g;
+      out[o + 2] = c.b;
+      out[o + 3] = 255;
+    }
+    return;
+  }
+
+  // gradient: u = (value - minIt) / (maxIt - minIt)
+  // world-map: u = value / maxIterations
+  const worldMap = lut.mode === 'world-map';
+  const offset = worldMap ? 0 : lut.minIt;
+  const invSpan = worldMap
+    ? 1 / Math.max(1, maxIterations)
+    : 1 / Math.max(1, lut.maxIt - lut.minIt);
+
+  for (let i = 0; i < count; i += 1) {
+    let u = (scalar[i] - offset) * invSpan;
+    if (u <= 0) u = 0;
+    else if (u >= 1) u = 1;
+    const idx = ((u * n1 + 0.5) | 0) * 3;
+    const o = i * 4;
+    out[o] = table[idx];
+    out[o + 1] = table[idx + 1];
+    out[o + 2] = table[idx + 2];
+    out[o + 3] = 255;
+  }
+}
+
+// Colorize one tile (a tile-sized scalar field) into a canvas, for storage in the
+// Tier-2 derived cache and blitting into the assembly.
+export function renderScalarTileToCanvas(
+  scalar: Float32Array,
+  w: number,
+  h: number,
+  maxIterations: number,
+  params: ColorParams,
+): HTMLCanvasElement {
+  const canvas = document.createElement('canvas');
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext('2d');
+  if (ctx) {
+    const img = ctx.createImageData(w, h);
+    const lut = buildColorLut(maxIterations, params);
+    fillRgbaFromLut(scalar, w * h, maxIterations, lut, img.data);
+    ctx.putImageData(img, 0, 0);
+  }
+  return canvas;
+}
+
+// Colorize a full-frame scalar field into a caller-provided ImageData. Reusing a
+// scratch ImageData across repaints avoids a multi-MB allocation every frame,
+// which matters for smooth slider drags and animation. `img` must be w*h.
+export function colorizeScalarFieldInto(
+  scalar: Float32Array,
+  w: number,
+  h: number,
+  maxIterations: number,
+  params: ColorParams,
+  img: ImageData,
+): void {
+  const lut = buildColorLut(maxIterations, params);
+  fillRgbaFromLut(scalar, w * h, maxIterations, lut, img.data);
+}
+
+// Colorize a full-frame scalar field into a fresh ImageData. Pure convenience
+// wrapper (used where no scratch buffer is available).
+export function colorizeScalarField(
+  scalar: Float32Array,
+  w: number,
+  h: number,
+  maxIterations: number,
+  params: ColorParams,
+): ImageData {
+  const img = new ImageData(w, h);
+  colorizeScalarFieldInto(scalar, w, h, maxIterations, params, img);
+  return img;
 }

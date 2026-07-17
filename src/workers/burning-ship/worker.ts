@@ -1,7 +1,8 @@
 import { WorkerTask, WorkerResponse } from '../../types';
 import { escapeIterations } from '../../core/strategies/burning-ship';
-import { Rgb, getPaletteColor, applyAdjustments } from '../../utils/color';
 import { clamp01 } from '../../utils/math';
+// Color mapping now happens on the main thread in Stage 2; the worker only emits
+// the scalar field. See color-stage-split-handoff.md.
 
 // Burning Ship fractal worker
 // Uses the modified iteration: zₙ₊₁ = (|x| + |y|)² + c
@@ -9,7 +10,7 @@ import { clamp01 } from '../../utils/math';
 self.onmessage = (event: MessageEvent<WorkerTask>) => {
   const payload = event.data;
   const pixelCount = (payload.rowEnd - payload.rowStart) * (payload.colEnd - payload.colStart);
-  const data = new Uint8ClampedArray(pixelCount * 4);
+  const data = new Float32Array(pixelCount);
   let steps = 0;
 
   const centerRe = payload.centerRe;
@@ -46,24 +47,7 @@ self.onmessage = (event: MessageEvent<WorkerTask>) => {
         valueForPalette = iter;
       }
 
-      const minIt = payload.autoAdjustColors ? 0 : Math.min(payload.paletteMinIterations, payload.paletteMaxIterations);
-      const maxIt = payload.autoAdjustColors ? Math.max(1, payload.maxIterations) : Math.max(1, Math.max(payload.paletteMinIterations, payload.paletteMaxIterations));
-      const pos = clamp01((valueForPalette - minIt) / Math.max(1, maxIt - minIt));
-
-      let color: Rgb;
-      if (payload.colorMode === 'black-white') {
-        const gray = iter >= payload.maxIterations ? 0 : 255;
-        color = { r: gray, g: gray, b: gray };
-      } else {
-        color = getPaletteColor(pos, payload.palette, payload.reverseColors, payload.colorCycles);
-      }
-
-      const adjusted = applyAdjustments(color, payload.hueShift, payload.saturation, payload.lightness, payload.colorSpace);
-
-      data[offset++] = adjusted.r;
-      data[offset++] = adjusted.g;
-      data[offset++] = adjusted.b;
-      data[offset++] = 255;
+      data[offset++] = valueForPalette;
     }
   }
 

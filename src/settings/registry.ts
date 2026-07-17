@@ -1,4 +1,5 @@
 import type { SettingDefinition, SettingSectionDefinition } from './types';
+import { cheapRecolorRepaint } from '../services/renderer';
 
 export const SECTIONS: SettingSectionDefinition[] = [
   { id: 'canvas', title: 'Canvas' },
@@ -62,6 +63,16 @@ export const coreSettings: SettingDefinition[] = [
   {
     id: 'tileCacheSize', kind: 'number', label: 'Max cached tiles', section: 'cache',
     default: 2000, min: 64, max: 20000, step: 64, rerender: false,
+    // The derived color cache can never exceed the compute cache (every colored
+    // tile is derived from a scalar tile), so this is the max end of the pair.
+    rangeLink: { role: 'max', pairedWith: 'colorCacheSize' },
+  },
+  {
+    // Tier-2 (derived/colored) tile cap. Clamped so it can never exceed
+    // tileCacheSize — see color-stage-split-handoff.md.
+    id: 'colorCacheSize', kind: 'number', label: 'Max colored (derived) tiles', section: 'cache',
+    default: 2000, min: 64, max: 20000, step: 64, rerender: false,
+    rangeLink: { role: 'min', pairedWith: 'tileCacheSize' },
   },
   {
     id: 'chunkMode', kind: 'select', label: 'Chunk mode', section: 'rendering', default: 'rectangles', rerender: true,
@@ -165,7 +176,8 @@ export const coreSettings: SettingDefinition[] = [
     ],
   },
   {
-    id: 'palette', kind: 'select', label: 'Color palette', section: 'color-palette', default: 'viridis', rerender: true,
+    id: 'palette', kind: 'select', label: 'Color palette', section: 'color-palette', default: 'viridis', rerender: false,
+    onChange: () => cheapRecolorRepaint(),
     options: [
       { value: 'viridis', label: 'Viridis' },
       { value: 'plasma', label: 'Plasma' },
@@ -179,29 +191,32 @@ export const coreSettings: SettingDefinition[] = [
       { value: 'grayscale', label: 'Grayscale' },
     ],
   },
-  { id: 'colorCycles', kind: 'slider', label: 'Color cycles', section: 'color-palette', default: 1, min: 1, max: 8, step: 1, rerender: true },
-  { id: 'reverseColors', kind: 'checkbox', label: 'Reverse colors', section: 'color-palette', default: false, rerender: true },
+  { id: 'colorCycles', kind: 'slider', label: 'Color cycles', section: 'color-palette', default: 1, min: 1, max: 8, step: 1, rerender: false, onChange: () => cheapRecolorRepaint() },
+  { id: 'reverseColors', kind: 'checkbox', label: 'Reverse colors', section: 'color-palette', default: false, rerender: false, onChange: () => cheapRecolorRepaint() },
   { id: 'smoothColoring', kind: 'checkbox', label: 'Smooth coloring', section: 'color-palette', default: true, rerender: true },
 
   // --- Palette range ---
-  { id: 'autoAdjustColors', kind: 'checkbox', label: 'Auto-adjust palette', section: 'palette-range', default: true, rerender: true },
+  { id: 'autoAdjustColors', kind: 'checkbox', label: 'Auto-adjust palette', section: 'palette-range', default: true, rerender: false, onChange: () => cheapRecolorRepaint() },
     {
     id: 'paletteMinIterations', kind: 'slider', label: 'Palette min iterations', section: 'palette-range',
-    default: 0, min: 0, max: 2000, step: 8, rerender: true,
+    default: 0, min: 0, max: 2000, step: 8, rerender: false,
+    onChange: () => cheapRecolorRepaint(),
     rangeLink: { role: 'min', pairedWith: 'paletteMaxIterations' },
     },
     {
     id: 'paletteMaxIterations', kind: 'slider', label: 'Palette max iterations', section: 'palette-range',
-    default: 199, min: 1, max: 2000, step: 8, rerender: true,
+    default: 199, min: 1, max: 2000, step: 8, rerender: false,
+    onChange: () => cheapRecolorRepaint(),
     rangeLink: { role: 'max', pairedWith: 'paletteMinIterations' },
     },
 
   // --- Adjust colors ---
-  { id: 'hueShift', kind: 'slider', label: 'Hue shift', section: 'adjust-colors', default: 0, min: 0, max: 360, step: 1, rerender: true },
-  { id: 'saturation', kind: 'slider', label: 'Saturation', section: 'adjust-colors', default: 1, min: 0, max: 2, step: 0.05, rerender: true, format: (v) => v.toFixed(2) },
-  { id: 'lightness', kind: 'slider', label: 'Lightness', section: 'adjust-colors', default: 1, min: 0, max: 2, step: 0.05, rerender: true, format: (v) => v.toFixed(2) },
+  { id: 'hueShift', kind: 'slider', label: 'Hue shift', section: 'adjust-colors', default: 0, min: 0, max: 360, step: 1, rerender: false, onChange: () => cheapRecolorRepaint() },
+  { id: 'saturation', kind: 'slider', label: 'Saturation', section: 'adjust-colors', default: 1, min: 0, max: 2, step: 0.05, rerender: false, onChange: () => cheapRecolorRepaint(), format: (v) => v.toFixed(2) },
+  { id: 'lightness', kind: 'slider', label: 'Lightness', section: 'adjust-colors', default: 1, min: 0, max: 2, step: 0.05, rerender: false, onChange: () => cheapRecolorRepaint(), format: (v) => v.toFixed(2) },
   {
-    id: 'colorSpace', kind: 'select', label: 'Color space', section: 'adjust-colors', default: 'hsl', rerender: true,
+    id: 'colorSpace', kind: 'select', label: 'Color space', section: 'adjust-colors', default: 'hsl', rerender: false,
+    onChange: () => cheapRecolorRepaint(),
     options: [
       { value: 'hsl', label: 'HSL' }, { value: 'hsluv', label: 'HSLuv' },
       { value: 'lch', label: 'LCh' }, { value: 'okhsl', label: 'Okhsl' },

@@ -1,23 +1,34 @@
-import { ViewState } from '../types';
+import { ViewState, ColorParams } from '../types';
 import { settingsEngine } from '../settings/instance';
 import { markDebug } from '../utils/debug';
+import { renderScalarTileToCanvas } from '../utils/color';
 
 export type TileCanvas = HTMLCanvasElement;
 
-// LRU cache. Map preserves insertion order; a hit re-inserts the entry at the
-// tail (most-recent), and eviction drops from the head (oldest).
-const cache = new Map<string, TileCanvas>();
+// A single cached tile at Stage 1: the raw per-pixel scalar field (valueForPalette)
+// the workers emit. Independent of palette/adjustments — those are Stage 2.
+export type ScalarTile = { data: Float32Array; w: number; h: number; maxIterations: number };
 
-// Index of how many cached tiles exist per zoom level (keyed by the zoomKey
-// string). Maintained incrementally in putTile/eviction/clear so enumerating
-// cached zoom levels is O(levels) instead of a full O(tiles) key scan — this is
-// on the hot path of the zoom-out preview, which runs every wheel tick. The
-// cache only ever holds tiles for a single signature at a time (it is cleared
-// on any signature change), so no signature bookkeeping is needed here.
+// Tier 1 — precious scalar-field cache (compute-signature keyed). Holds the raw
+// per-pixel `valueForPalette` from the workers; never invalidated by a palette or
+// adjustment change.
+const scalarCache = new Map<string, ScalarTile>();
+// Tier 2 — cheap derived color cache (compute-signature + color-signature keyed).
+// The colorized canvas for a given color state; rebuilt on demand from Tier 1
+// whenever the color signature changes. See color-stage-split-handoff.md.
+const colorCache = new Map<string, TileCanvas>();
+// computeKey -> set of colorSig values present in colorCache, for cascade eviction.
+const colorChildren = new Map<string, Set<string>>();
+
+// Coverage index: how many Tier-1 tiles exist per zoom level (keyed by zoomKey
+// string). Maintained incrementally in putScalarTile/eviction/clear so the
+// zoom-out preview can enumerate cached levels in O(levels). The cache only holds
+// tiles for a single compute signature at a time (cleared on any compute change),
+// so no signature bookkeeping is needed here.
 const zoomLevelCounts = new Map<string, number>();
 
-// Extract the zoomKey substring from a cache key of the form
-// `${signature}#${zoomKey}#${col}#${row}`. The signature never contains '#'
+// Extract the zoomKey substring from a compute key of the form
+// `${computeSig}#${zoomKey}#${col}#${row}`. The compute sig never contains '#'
 // (it joins with '|' and '='), so the first two '#' delimit the zoomKey.
 function keyZoomKey(key: string): string | null {
   const first = key.indexOf('#');
@@ -41,10 +52,11 @@ function indexRemove(key: string): void {
   else zoomLevelCounts.set(zk, next);
 }
 
-// Signature of every setting that affects the rendered pixels OR the tile
-// geometry. Changing any of these makes cached tiles invalid; we clear the
-// whole map on change (and the signature is also part of each key).
-const SIGNATURE_KEYS: string[] = [
+// --- Signature split -------------------------------------------------------
+// Compute signature: changing any of these invalidates Tier 1 (re-runs the
+// expensive escape-time iteration). Includes colorMode/smoothColoring because they
+// change HOW the scalar is computed during iteration.
+const COMPUTE_SIGNATURE_KEYS: string[] = [
   'fractalType',
   'maxIterations',
   'width',
@@ -55,9 +67,17 @@ const SIGNATURE_KEYS: string[] = [
   'geometricCulling',
   'periodicityChecking',
   'colorMode',
+  'smoothColoring',
+  'flipX',
+  'flipY',
+];
+
+// Color signature: changing any of these only invalidates Tier 2 (the cheap
+// palette lookup + adjustment stage). paletteMin/Max and autoAdjust are here
+// because they are pure normalization of the scalar — cheap to redo in Stage 2.
+const COLOR_SIGNATURE_KEYS: string[] = [
   'palette',
   'reverseColors',
-  'smoothColoring',
   'colorCycles',
   'autoAdjustColors',
   'paletteMinIterations',
@@ -66,33 +86,62 @@ const SIGNATURE_KEYS: string[] = [
   'saturation',
   'lightness',
   'colorSpace',
-  'flipX',
-  'flipY',
 ];
 
-function computeSignature(): string {
-  return SIGNATURE_KEYS.map((id) => `${id}=${settingsEngine.getValue(id)}`).join('|');
+function computeComputeSignature(): string {
+  return COMPUTE_SIGNATURE_KEYS.map((id) => `${id}=${settingsEngine.getValue(id)}`).join('|');
 }
 
-let lastSignature = '';
+export function getCurrentColorSignature(): string {
+  return COLOR_SIGNATURE_KEYS.map((id) => `${id}=${settingsEngine.getValue(id)}`).join('|');
+}
 
-/** Clear the cache if a pixel-affecting setting changed since last render. */
+export function getCurrentColorParams(): ColorParams {
+  return {
+    colorMode: settingsEngine.getValue('colorMode') as ColorParams['colorMode'],
+    palette: settingsEngine.getValue('palette') as ColorParams['palette'],
+    reverseColors: settingsEngine.getValue('reverseColors') as boolean,
+    smoothColoring: settingsEngine.getValue('smoothColoring') as boolean,
+    colorCycles: settingsEngine.getValue('colorCycles') as number,
+    autoAdjustColors: settingsEngine.getValue('autoAdjustColors') as boolean,
+    paletteMinIterations: settingsEngine.getValue('paletteMinIterations') as number,
+    paletteMaxIterations: settingsEngine.getValue('paletteMaxIterations') as number,
+    hueShift: settingsEngine.getValue('hueShift') as number,
+    saturation: settingsEngine.getValue('saturation') as number,
+    lightness: settingsEngine.getValue('lightness') as number,
+    colorSpace: settingsEngine.getValue('colorSpace') as ColorParams['colorSpace'],
+  };
+}
+
+let lastComputeSig = '';
+let lastColorSig = '';
+
+/**
+ * Clear caches as needed for any pixel-affecting or color-affecting change since
+ * the last call. A compute-signature change clears BOTH tiers (the expensive
+ * scalar field is invalid). A color-signature change clears ONLY Tier 2 — Tier 1
+ * (the precious compute) survives, so color swaps are non-destructive and cheap.
+ */
 export function ensureSignatureCurrent(): void {
-  const sig = computeSignature();
-  if (sig !== lastSignature) {
-    if (cache.size > 0) {
-      markDebug('tilecache:signature-change-clear', { size: cache.size });
+  const computeSig = computeComputeSignature();
+  const colorSig = getCurrentColorSignature();
+  if (computeSig !== lastComputeSig) {
+    if (scalarCache.size > 0) {
+      markDebug('tilecache:signature-change-clear', { size: scalarCache.size });
     }
-    cache.clear();
-    zoomLevelCounts.clear();
-    lastSignature = sig;
+    clearCompute();
+    lastComputeSig = computeSig;
+    lastColorSig = colorSig;
+  } else if (colorSig !== lastColorSig) {
+    clearColor();
+    lastColorSig = colorSig;
   }
 }
 
-/** Current render signature, clearing the cache first if it changed. */
+/** Current COMPUTE signature, clearing caches first if it changed. */
 export function getRenderSignature(): string {
   ensureSignatureCurrent();
-  return computeSignature();
+  return computeComputeSignature();
 }
 
 function zoomKey(zoom: number): string {
@@ -105,44 +154,139 @@ export function keyFor(signature: string, zoom: number, col: number, row: number
   return `${signature}#${zoomKey(zoom)}#${col}#${row}`;
 }
 
-function cap(): number {
+// Color cache key = compute key + '@' + color sig. The compute key contains '#'
+// but never '@'; the color sig contains neither. We never run keyZoomKey on a
+// color key, so the extra segment is harmless.
+function colorKeyFor(computeKey: string, colorSig: string): string {
+  return `${computeKey}@${colorSig}`;
+}
+function computeKeyOf(colorKey: string): string {
+  const at = colorKey.indexOf('@');
+  return at < 0 ? colorKey : colorKey.slice(0, at);
+}
+function colorSigOf(colorKey: string): string {
+  const at = colorKey.indexOf('@');
+  return at < 0 ? '' : colorKey.slice(at + 1);
+}
+
+function capCompute(): number {
   const v = settingsEngine.getValue('tileCacheSize');
   return typeof v === 'number' ? v : 2000;
 }
-
-export function getTile(key: string): TileCanvas | undefined {
-  const tile = cache.get(key);
-  if (tile === undefined) return undefined;
-  // LRU touch: move to the tail so recently-used tiles survive eviction.
-  cache.delete(key);
-  cache.set(key, tile);
-  return tile;
+function capColor(): number {
+  const v = settingsEngine.getValue('colorCacheSize');
+  return typeof v === 'number' ? v : 2000;
 }
 
-export function putTile(key: string, tile: TileCanvas): void {
-  const existed = cache.has(key);
-  cache.delete(key);
-  cache.set(key, tile);
-  if (!existed) indexAdd(key);
-  const limit = cap();
-  let overshoot = cache.size - limit;
+/**
+ * Stage 2 entry point used by all assembly paths. Returns the colorized canvas
+ * for a tile under a given color state:
+ *  - Tier-2 hit: return the cached canvas (LRU-touch Tier 2, and refresh the
+ *    Tier-1 parent so a displayed tile can't lose its scalar to eviction).
+ *  - Tier-1 hit: colorize the scalar tile, cache it in Tier 2, return.
+ *  - miss: return undefined (caller dispatches a worker for the scalar tile).
+ */
+export function getTile(computeKey: string, colorSig: string, params: ColorParams): TileCanvas | undefined {
+  const colorKey = colorKeyFor(computeKey, colorSig);
+  const existing = colorCache.get(colorKey);
+  if (existing) {
+    colorCache.delete(colorKey);
+    colorCache.set(colorKey, existing);
+    const scalar = scalarCache.get(computeKey);
+    if (scalar) {
+      scalarCache.delete(computeKey);
+      scalarCache.set(computeKey, scalar);
+    }
+    return existing;
+  }
+  const scalar = scalarCache.get(computeKey);
+  if (!scalar) return undefined;
+  // LRU touch Tier 1 (this path colorizes, so the scalar is in active use).
+  scalarCache.delete(computeKey);
+  scalarCache.set(computeKey, scalar);
+  const canvas = renderScalarTileToCanvas(scalar.data, scalar.w, scalar.h, scalar.maxIterations, params);
+  colorCache.set(colorKey, canvas);
+  let children = colorChildren.get(computeKey);
+  if (!children) {
+    children = new Set();
+    colorChildren.set(computeKey, children);
+  }
+  children.add(colorSig);
+  evictColorIfNeeded();
+  return canvas;
+}
+
+/** Store a computed scalar tile in Tier 1. Evicts (with cascade) if over cap. */
+export function putScalarTile(computeKey: string, tile: ScalarTile): void {
+  const existed = scalarCache.has(computeKey);
+  scalarCache.delete(computeKey);
+  scalarCache.set(computeKey, tile);
+  if (!existed) indexAdd(computeKey);
+  const limit = capCompute();
+  let overshoot = scalarCache.size - limit;
   if (overshoot > 0) {
-    for (const oldKey of cache.keys()) {
-      cache.delete(oldKey);
-      indexRemove(oldKey);
+    for (const oldKey of scalarCache.keys()) {
+      evictScalar(oldKey);
       overshoot -= 1;
       if (overshoot <= 0) break;
     }
   }
 }
 
+function evictScalar(computeKey: string): void {
+  scalarCache.delete(computeKey);
+  indexRemove(computeKey);
+  const children = colorChildren.get(computeKey);
+  if (children) {
+    for (const colorSig of children) {
+      colorCache.delete(colorKeyFor(computeKey, colorSig));
+    }
+    colorChildren.delete(computeKey);
+  }
+}
+
+// Tier-2 LRU eviction driven by colorCacheSize. Drop from the head; cascade-remove
+// from the children index so an evicted color tile isn't tracked as a child.
+function evictColorIfNeeded(): void {
+  const limit = capColor();
+  let overshoot = colorCache.size - limit;
+  if (overshoot <= 0) return;
+  for (const colorKey of colorCache.keys()) {
+    colorCache.delete(colorKey);
+    const ck = computeKeyOf(colorKey);
+    const children = colorChildren.get(ck);
+    if (children) {
+      children.delete(colorSigOf(colorKey));
+      if (children.size === 0) colorChildren.delete(ck);
+    }
+    overshoot -= 1;
+    if (overshoot <= 0) break;
+  }
+}
+
 export function clearCache(): void {
-  cache.clear();
+  clearCompute();
+  clearColor();
+}
+
+function clearCompute(): void {
+  scalarCache.clear();
   zoomLevelCounts.clear();
+  colorChildren.clear();
+  colorCache.clear(); // every color tile is orphaned once its scalar is gone
+}
+
+function clearColor(): void {
+  colorCache.clear();
+  colorChildren.clear();
 }
 
 export function cacheSize(): number {
-  return cache.size;
+  return scalarCache.size;
+}
+
+export function colorCacheCount(): number {
+  return colorCache.size;
 }
 
 function tilePixelSize(width: number, height: number): { tw: number; th: number } {
@@ -219,8 +363,9 @@ export function visibleTileRange(
  * Build an offscreen assembly canvas from cached tiles for `view`. The assembly
  * is a whole-world-tile-aligned grid (with a 1-tile margin) covering the
  * viewport; its pixel (0,0) sits exactly on a world-tile boundary, so assembly
- * tile (i,j) is world tile (range.colStart+i, range.rowStart+j). Tiles not in
- * the cache are reported as misses so the caller can dispatch workers for them.
+ * tile (i,j) is world tile (range.colStart+i, range.rowStart+j). Tiles are read
+ * through `getTile`, so they are colorized (Stage 2) on demand and the assembly
+ * is already in final color.
  *
  * Screen position of the assembly's top-left under a live view is:
  *   (assemblyCenterRe - live.centerRe) / scaleRe + (width - assemblyWidth) / 2
@@ -232,6 +377,9 @@ export function assembleFromCache(
   height: number,
   includeMisses: boolean,
 ): AssembledView {
+  const computeSig = computeComputeSignature();
+  const colorSig = getCurrentColorSignature();
+  const params = getCurrentColorParams();
   const { scaleRe, scaleIm } = scaleForView(view, width, height);
   const { tw, th } = tilePixelSize(width, height);
   const range = visibleTileRange(view, width, height, tw, th);
@@ -244,16 +392,14 @@ export function assembleFromCache(
   const actx = assembly.getContext('2d');
   if (actx) actx.imageSmoothingEnabled = false;
 
-  const signature = computeSignature();
   const zoom = view.zoom;
-
   const misses: AssembledView['misses'] = [];
   for (let j = 0; j < range.numTilesY; j += 1) {
     for (let i = 0; i < range.numTilesX; i += 1) {
       const col = range.colStart + i;
       const row = range.rowStart + j;
-      const key = keyFor(signature, zoom, col, row);
-      const tile = getTile(key);
+      const key = keyFor(computeSig, zoom, col, row);
+      const tile = getTile(key, colorSig, params);
       if (tile && actx) {
         actx.drawImage(tile, i * tw, j * th);
       } else if (includeMisses) {
@@ -286,8 +432,8 @@ export function assembleFromCache(
 
 // Geometry + uncached-tile list for a view, WITHOUT allocating or blitting an
 // assembly canvas. Used for look-ahead prerender layers, which only need to know
-// which tiles to compute (they are cached via putTile, never painted), so the
-// per-level canvas allocation that assembleFromCache does would be pure waste.
+// which tiles to compute (they are cached via putScalarTile, never painted), so
+// the per-level canvas allocation that assembleFromCache does would be pure waste.
 export type LayerMisses = {
   assemblyCenterRe: number;
   assemblyCenterIm: number;
@@ -302,22 +448,21 @@ export type LayerMisses = {
 };
 
 export function collectLayerMisses(view: ViewState, width: number, height: number): LayerMisses {
+  const computeSig = computeComputeSignature();
   const { scaleRe, scaleIm } = scaleForView(view, width, height);
   const { tw, th } = tilePixelSize(width, height);
   const range = visibleTileRange(view, width, height, tw, th);
   const assemblyWidth = range.numTilesX * tw;
   const assemblyHeight = range.numTilesY * th;
 
-  const signature = computeSignature();
   const zoom = view.zoom;
-
   const misses: LayerMisses['misses'] = [];
   for (let j = 0; j < range.numTilesY; j += 1) {
     for (let i = 0; i < range.numTilesX; i += 1) {
       const col = range.colStart + i;
       const row = range.rowStart + j;
       // Peek only (no getTile) so this selection pass does not churn LRU order.
-      if (!cache.has(keyFor(signature, zoom, col, row))) {
+      if (!scalarCache.has(keyFor(computeSig, zoom, col, row))) {
         misses.push({ col, row, i, j });
       }
     }
@@ -419,8 +564,7 @@ function candidateTileRange(
 }
 
 // Distinct cached zoom levels. Reads the maintained zoom-level index (O(levels))
-// rather than scanning the whole cache. The cache holds a single signature at a
-// time, so every indexed level belongs to the current signature.
+// rather than scanning the whole cache.
 function listCachedZoomLevels(): number[] {
   const levels: number[] = [];
   for (const zk of zoomLevelCounts.keys()) {
@@ -431,7 +575,8 @@ function listCachedZoomLevels(): number[] {
 }
 
 // Fraction of the target viewport covered by cached tiles at `candidateZoom`.
-// Peek-only (no draw, no LRU churn) so the selection pass stays cheap.
+// Peek-only (no draw, no LRU churn) so the selection pass stays cheap. Coverage is
+// about TIER-1 presence — any computed tile can be colorized on demand.
 function candidateCoverage(
   view: ViewState,
   width: number,
@@ -445,7 +590,7 @@ function candidateCoverage(
   for (let j = 0; j < r.numTilesY; j += 1) {
     for (let i = 0; i < r.numTilesX; i += 1) {
       total += 1;
-      if (cache.has(keyFor(signature, candidateZoom, r.colStart + i, r.rowStart + j))) {
+      if (scalarCache.has(keyFor(signature, candidateZoom, r.colStart + i, r.rowStart + j))) {
         covered += 1;
       }
     }
@@ -461,7 +606,7 @@ function pickBestCachedZoom(
   height: number,
   opts: ZoomPreviewOptions,
 ): number | null {
-  const signature = computeSignature();
+  const signature = computeComputeSignature();
   const targetZoom = view.zoom;
   const excludeKey = opts.excludeZoom !== undefined ? zoomKey(opts.excludeZoom) : null;
   const notExcluded = (z: number) => excludeKey === null || zoomKey(z) !== excludeKey;
@@ -501,7 +646,9 @@ function assembleScaledViewport(
   height: number,
   candidateZoom: number,
 ): HTMLCanvasElement | null {
-  const signature = computeSignature();
+  const computeSig = computeComputeSignature();
+  const colorSig = getCurrentColorSignature();
+  const params = getCurrentColorParams();
   const { scaleRe, scaleIm } = scaleForView(view, width, height);
   const r = candidateTileRange(view, width, height, candidateZoom);
 
@@ -515,7 +662,8 @@ function assembleScaledViewport(
   let covered = 0;
   for (let j = 0; j < r.numTilesY; j += 1) {
     for (let i = 0; i < r.numTilesX; i += 1) {
-      const tile = getTile(keyFor(signature, candidateZoom, r.colStart + i, r.rowStart + j));
+      const key = keyFor(computeSig, candidateZoom, r.colStart + i, r.rowStart + j);
+      const tile = getTile(key, colorSig, params);
       if (tile) {
         actx.drawImage(tile, i * r.tw, j * r.th);
         covered += 1;
@@ -531,8 +679,6 @@ function assembleScaledViewport(
   if (!ctx) return null;
   ctx.imageSmoothingEnabled = false;
 
-  // Range top-left in world coords -> target-view screen coords, then draw the
-  // whole assembly scaled to the target.
   const screenX = (r.colStart * r.tileWorldW - (view.centerRe - (width / 2) * scaleRe)) / scaleRe;
   const screenY = (r.rowStart * r.tileWorldH - (view.centerIm - (height / 2) * scaleIm)) / scaleIm;
   const drawW = (r.numTilesX * r.tileWorldW) / scaleRe;
@@ -557,4 +703,89 @@ export function assembleBestCachedViewport(
   const bestZoom = pickBestCachedZoom(view, width, height, opts);
   if (bestZoom === null) return null;
   return assembleScaledViewport(view, width, height, bestZoom);
+}
+
+// --- Base scalar-frame capture ----------------------------------------------
+// Assemble the scalar field for `view` (mirroring assembleFromCache's geometry)
+// into a single Float32Array. Used to capture renderContext.baseScalarField so a
+// color change can be repainted (or an animation recolored) without re-iterating.
+export type AssembledScalar = {
+  data: Float32Array;
+  width: number;
+  height: number;
+  canvasWidth: number;
+  canvasHeight: number;
+  sx0: number;
+  sy0: number;
+  maxIterations: number;
+  view: ViewState;
+};
+
+export function assembleScalarField(
+  view: ViewState,
+  width: number,
+  height: number,
+): AssembledScalar | null {
+  const computeSig = computeComputeSignature();
+  const { scaleRe, scaleIm } = scaleForView(view, width, height);
+  const { tw, th } = tilePixelSize(width, height);
+  const range = visibleTileRange(view, width, height, tw, th);
+  const assemblyWidth = range.numTilesX * tw;
+  const assemblyHeight = range.numTilesY * th;
+  const maxIterations = settingsEngine.getValue('maxIterations') as number;
+  const data = new Float32Array(assemblyWidth * assemblyHeight);
+
+  const zoom = view.zoom;
+  let covered = 0;
+  for (let j = 0; j < range.numTilesY; j += 1) {
+    for (let i = 0; i < range.numTilesX; i += 1) {
+      const col = range.colStart + i;
+      const row = range.rowStart + j;
+      const key = keyFor(computeSig, zoom, col, row);
+      const tile = scalarCache.get(key);
+      if (tile) {
+        covered += 1;
+        for (let ty = 0; ty < th; ty += 1) {
+          const srcOff = ty * tw;
+          const dstOff = (j * th + ty) * assemblyWidth + i * tw;
+          for (let tx = 0; tx < tw; tx += 1) {
+            data[dstOff + tx] = tile.data[srcOff + tx];
+          }
+        }
+      } else {
+        // Missing tile within a captured frame: fill with the interior scalar so
+        // Stage 2 maps it to the interior color (avoid leaving a black hole). In
+        // practice the base frame is only captured once a frame is fully resolved.
+        for (let ty = 0; ty < th; ty += 1) {
+          const dstOff = (j * th + ty) * assemblyWidth + i * tw;
+          for (let tx = 0; tx < tw; tx += 1) {
+            data[dstOff + tx] = maxIterations;
+          }
+        }
+      }
+    }
+  }
+  if (covered === 0) return null;
+
+  const tileWorldW = tw * scaleRe;
+  const tileWorldH = th * scaleIm;
+  // Offset must match presentAssembly exactly, or the recolored buffer lands at
+  // the wrong screen position and the assembly's margin tiles (neighboring world
+  // positions) bleed over the viewport.
+  const assemblyCenterRe = ((range.colStart + range.numTilesX) * tileWorldW + range.colStart * tileWorldW) / 2;
+  const assemblyCenterIm = ((range.rowStart + range.numTilesY) * tileWorldH + range.rowStart * tileWorldH) / 2;
+  const sx0 = (assemblyCenterRe - view.centerRe) / scaleRe + (width - assemblyWidth) / 2;
+  const sy0 = (assemblyCenterIm - view.centerIm) / scaleIm + (height - assemblyHeight) / 2;
+
+  return {
+    data,
+    width: assemblyWidth,
+    height: assemblyHeight,
+    canvasWidth: width,
+    canvasHeight: height,
+    sx0,
+    sy0,
+    maxIterations,
+    view: { ...view },
+  };
 }

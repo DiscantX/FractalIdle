@@ -1,14 +1,19 @@
-import { ColorMode, PaletteName, ColorSpace, ViewState, FractalType, WorkerTask, WorkerResponse } from '../types';
+import { ColorMode, ViewState, FractalType, WorkerTask, WorkerResponse } from '../types';
 import { settingsEngine } from '../settings/instance';
 import { state, renderContext, PREVIEW_PLACEHOLDER_COLOR } from '../state';
 import { drawingContext } from '../ui/dom';
 import { markDebug } from '../utils/debug';
+import { colorizeScalarFieldInto } from '../utils/color';
 import {
   assembleFromCache,
   assembleBestCachedViewport,
   collectLayerMisses,
   ensureSignatureCurrent,
-  putTile,
+  putScalarTile,
+  getTile,
+  assembleScalarField,
+  getCurrentColorSignature,
+  getCurrentColorParams,
   keyFor,
   getRenderSignature,
 } from './tile-cache';
@@ -285,6 +290,66 @@ export function requestRender(
   renderFrame(state.activeRenderId, focalX, focalY, opts);
 }
 
+/**
+ * Repaint the current frame with new color/adjustment settings WITHOUT
+ * re-running escape-time. Coalesced onto a single requestAnimationFrame so a
+ * rapid slider drag never blocks: each onChange just marks the frame dirty and
+ * returns immediately (the slider stays responsive), and at most one repaint
+ * runs per animation frame using the latest settings. The actual work happens in
+ * performRecolor below.
+ */
+let recolorScheduled = false;
+
+export function cheapRecolorRepaint(): void {
+  if (recolorScheduled) return;
+  recolorScheduled = true;
+  requestAnimationFrame(() => {
+    recolorScheduled = false;
+    performRecolor();
+  });
+}
+
+// A scratch ImageData reused across repaints so a color-slider drag or animation
+// doesn't allocate a multi-MB buffer every frame. Rebuilt only when the assembly
+// dimensions change.
+let recolorScratch: ImageData | null = null;
+
+/**
+ * The actual recolor. If the captured base scalar frame is still valid for the
+ * current view, run Stage 2 (colorizeScalarFieldInto) over it directly — no
+ * workers, no cache wipe. Falls back to a full render when the view has changed
+ * since the base frame was captured (e.g. a mid/post-pan slider change).
+ */
+function performRecolor(): void {
+  // Keep the derived Tier-2 color cache from holding stale, now-unkeyed canvases.
+  ensureSignatureCurrent();
+  const base = renderContext.baseScalarField;
+  const width = settingsEngine.getValue('width') as number;
+  const height = settingsEngine.getValue('height') as number;
+  const viewMatches =
+    base !== null &&
+    base.view.centerRe === state.view.centerRe &&
+    base.view.centerIm === state.view.centerIm &&
+    base.view.zoom === state.view.zoom &&
+    base.canvasWidth === width &&
+    base.canvasHeight === height;
+  if (viewMatches && base) {
+    const params = getCurrentColorParams();
+    if (
+      !recolorScratch ||
+      recolorScratch.width !== base.width ||
+      recolorScratch.height !== base.height
+    ) {
+      recolorScratch = new ImageData(base.width, base.height);
+    }
+    colorizeScalarFieldInto(base.data, base.width, base.height, base.maxIterations, params, recolorScratch);
+    drawingContext.putImageData(recolorScratch, Math.round(base.sx0), Math.round(base.sy0));
+    markDebug('render:cheap-recolor', { width: base.width, height: base.height });
+  } else {
+    requestRender();
+  }
+}
+
 // Draw the assembled canvas (cached tiles) onto the live canvas at the correct
 // screen position for `view`. Drawn as a single image at an integer offset with
 // smoothing off, so adjacent tiles never show sub-pixel seams during progress.
@@ -409,19 +474,14 @@ export function renderFrame(
   const geometricCulling = settingsEngine.getValue('geometricCulling') as boolean;
   const periodicityChecking = settingsEngine.getValue('periodicityChecking') as boolean;
   const colorMode = settingsEngine.getValue('colorMode') as ColorMode;
-  const palette = settingsEngine.getValue('palette') as PaletteName;
-  const reverseColors = settingsEngine.getValue('reverseColors') as boolean;
   const smoothColoring = settingsEngine.getValue('smoothColoring') as boolean;
-  const colorCycles = settingsEngine.getValue('colorCycles') as number;
-  const autoAdjustColors = settingsEngine.getValue('autoAdjustColors') as boolean;
-  const paletteMinIterations = settingsEngine.getValue('paletteMinIterations') as number;
-  const paletteMaxIterations = settingsEngine.getValue('paletteMaxIterations') as number;
-  const hueShift = settingsEngine.getValue('hueShift') as number;
-  const saturation = settingsEngine.getValue('saturation') as number;
-  const lightness = settingsEngine.getValue('lightness') as number;
-  const colorSpace = settingsEngine.getValue('colorSpace') as ColorSpace;
   const flipX = settingsEngine.getValue('flipX') as boolean;
   const flipY = settingsEngine.getValue('flipY') as boolean;
+  // Color state is no longer part of the worker task — it's Stage 2 (main
+  // thread). Capture it once for the whole render so tile results can be
+  // colorized consistently.
+  const colorSig = getCurrentColorSignature();
+  const colorParams = getCurrentColorParams();
 
   const signature = getRenderSignature();
   // A render may target an explicit view (the zoom animation's destination) that
@@ -577,6 +637,14 @@ export function renderFrame(
   const firePrimaryComplete = () => {
     if (primaryComplete || renderId !== state.activeRenderId) return;
     primaryComplete = true;
+    // Capture the resolved scalar frame so a later color/adjustment change can be
+    // repainted (or animated) without re-iterating. Skip while a pan is still
+    // drifting (view about to move) or during a smooth zoom (the background render
+    // targets a different view than the live, interpolated one, so its frame is
+    // partial/transient).
+    if (!state.zoomAnimation && !(renderContext.panActive && viewDrifted(renderView, state.view))) {
+      renderContext.baseScalarField = assembleScalarField(state.view, width, height);
+    }
     if (!renderContext.panActive) {
       state.lastRenderMs = performance.now() - start;
       state.lastSteps = totalSteps;
@@ -624,17 +692,7 @@ export function renderFrame(
     interiorNoiseMode: 'single',
     interiorNoiseStrength: 0,
     colorMode,
-    palette,
-    reverseColors,
     smoothColoring,
-    colorCycles,
-    autoAdjustColors,
-    paletteMinIterations,
-    paletteMaxIterations,
-    hueShift,
-    saturation,
-    lightness,
-    colorSpace,
     flipX,
     flipY,
   });
@@ -655,19 +713,21 @@ export function renderFrame(
     const col = layer.range.colStart + q.i;
     const row = layer.range.rowStart + q.j;
 
-    // Store the tile in the cache (world-keyed by its own zoom) for instant reuse
-    // when the live zoom reaches this level. Primary tiles also blit into the
-    // assembly and repaint; look-ahead tiles are cache-only.
-    const tileCanvas = document.createElement('canvas');
-    tileCanvas.width = layer.tileW;
-    tileCanvas.height = layer.tileH;
-    const tctx = tileCanvas.getContext('2d');
-    if (tctx) {
-      tctx.putImageData(new ImageData(new Uint8ClampedArray(response.data), layer.tileW, layer.tileH), 0, 0);
-      putTile(keyFor(signature, layer.zoom, col, row), tileCanvas);
-      if (layer.primary && layer.actx) {
-        layer.actx.drawImage(tileCanvas, q.i * layer.tileW, q.j * layer.tileH);
-      }
+    // Store the scalar field in Tier 1 (world-keyed by its own zoom) for instant
+    // reuse when the live zoom reaches this level. Then colorize it (Stage 2) into
+    // a canvas for the assembly blit; the colored canvas is also cached in Tier 2.
+    // Primary tiles also blit into the assembly and repaint; look-ahead tiles are
+    // cache-only.
+    const computeKey = keyFor(signature, layer.zoom, col, row);
+    putScalarTile(computeKey, {
+      data: response.data,
+      w: layer.tileW,
+      h: layer.tileH,
+      maxIterations,
+    });
+    const tileCanvas = getTile(computeKey, colorSig, colorParams);
+    if (tileCanvas && layer.primary && layer.actx) {
+      layer.actx.drawImage(tileCanvas, q.i * layer.tileW, q.j * layer.tileH);
     }
 
     if (layer.primary) {

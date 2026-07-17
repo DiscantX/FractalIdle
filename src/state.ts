@@ -1,4 +1,5 @@
 import { RenderState, DragState, RenderLogEntry, DebugEvent, FractalType, ViewState } from './types';
+import type { AssembledScalar } from './services/tile-cache';
 
 export const STORAGE_KEY = 'mandelbrot-render-logs';
 export const PREVIEW_PLACEHOLDER_COLOR = '#0f172a';
@@ -50,4 +51,9 @@ export const renderContext = {
   // zoom, reset). Read by the renderer to bias speculative (look-ahead /
   // look-behind) level ordering toward the direction the user is moving.
   lastZoomDir: 'none' as 'in' | 'out' | 'none',
+  // The fully-resolved scalar frame for the current view, captured at
+  // primary-complete. Lets a color/adjustment change be repainted (Stage 2) or
+  // an animation recolored without re-running escape-time. Null until the first
+  // full frame resolves, or when the view has since changed.
+  baseScalarField: null as AssembledScalar | null,
 };

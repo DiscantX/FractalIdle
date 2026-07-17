@@ -53,6 +53,26 @@ export type TileTask = {
   colEnd: number;
 };
 
+// All inputs to Stage 2 (the main-thread color stage). Computed once per render
+// from the settings engine and passed to the colorize functions. Kept separate
+// from WorkerTask because these no longer cross the worker boundary — the worker
+// only computes the scalar field, and Stage 2 owns the entire palette + adjustment
+// mapping. See color-stage-split-handoff.md.
+export type ColorParams = {
+  colorMode: ColorMode;
+  palette: PaletteName;
+  reverseColors: boolean;
+  smoothColoring: boolean;
+  colorCycles: number;
+  autoAdjustColors: boolean;
+  paletteMinIterations: number;
+  paletteMaxIterations: number;
+  hueShift: number;
+  saturation: number;
+  lightness: number;
+  colorSpace: ColorSpace;
+};
+
 export type WorkerTask = {
   renderId: number;
   width: number;
@@ -67,18 +87,11 @@ export type WorkerTask = {
   colEnd: number;
   scaleRe: number;
   scaleIm: number;
+  // colorMode and smoothColoring stay in Stage 1: they change HOW the scalar is
+  // computed during iteration (smooth needs escape radius at escape time), so
+  // they remain part of the compute signature and still trigger a re-render.
   colorMode: ColorMode;
-  palette: PaletteName;
-  reverseColors: boolean;
   smoothColoring: boolean;
-  colorCycles: number;
-  autoAdjustColors: boolean;
-  paletteMinIterations: number;
-  paletteMaxIterations: number;
-  hueShift: number;
-  saturation: number;
-  lightness: number;
-  colorSpace: ColorSpace;
   solidGuessing: boolean;
   geometricCulling: boolean;
   periodicityChecking: boolean;
@@ -95,11 +108,13 @@ export type WorkerResponse = {
   rowEnd: number;
   colStart: number;
   colEnd: number;
-  data: Uint8ClampedArray;
+  // Per-pixel scalar field (valueForPalette), NOT final RGB. Stage 2 turns this
+  // into color on the main thread. Transferred as a Float32Array.
+  data: Float32Array;
   steps: number;
   solidGuessed?: boolean;
   culledPixels?: number;
-  periodicityShortCircuits?: number;  
+  periodicityShortCircuits?: number;
 };
 
 export type RenderLogEntry = {
