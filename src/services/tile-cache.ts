@@ -8,6 +8,39 @@ export type TileCanvas = HTMLCanvasElement;
 // tail (most-recent), and eviction drops from the head (oldest).
 const cache = new Map<string, TileCanvas>();
 
+// Index of how many cached tiles exist per zoom level (keyed by the zoomKey
+// string). Maintained incrementally in putTile/eviction/clear so enumerating
+// cached zoom levels is O(levels) instead of a full O(tiles) key scan — this is
+// on the hot path of the zoom-out preview, which runs every wheel tick. The
+// cache only ever holds tiles for a single signature at a time (it is cleared
+// on any signature change), so no signature bookkeeping is needed here.
+const zoomLevelCounts = new Map<string, number>();
+
+// Extract the zoomKey substring from a cache key of the form
+// `${signature}#${zoomKey}#${col}#${row}`. The signature never contains '#'
+// (it joins with '|' and '='), so the first two '#' delimit the zoomKey.
+function keyZoomKey(key: string): string | null {
+  const first = key.indexOf('#');
+  if (first < 0) return null;
+  const second = key.indexOf('#', first + 1);
+  if (second < 0) return null;
+  return key.slice(first + 1, second);
+}
+
+function indexAdd(key: string): void {
+  const zk = keyZoomKey(key);
+  if (zk === null) return;
+  zoomLevelCounts.set(zk, (zoomLevelCounts.get(zk) ?? 0) + 1);
+}
+
+function indexRemove(key: string): void {
+  const zk = keyZoomKey(key);
+  if (zk === null) return;
+  const next = (zoomLevelCounts.get(zk) ?? 0) - 1;
+  if (next <= 0) zoomLevelCounts.delete(zk);
+  else zoomLevelCounts.set(zk, next);
+}
+
 // Signature of every setting that affects the rendered pixels OR the tile
 // geometry. Changing any of these makes cached tiles invalid; we clear the
 // whole map on change (and the signature is also part of each key).
@@ -51,6 +84,7 @@ export function ensureSignatureCurrent(): void {
       markDebug('tilecache:signature-change-clear', { size: cache.size });
     }
     cache.clear();
+    zoomLevelCounts.clear();
     lastSignature = sig;
   }
 }
@@ -86,13 +120,16 @@ export function getTile(key: string): TileCanvas | undefined {
 }
 
 export function putTile(key: string, tile: TileCanvas): void {
+  const existed = cache.has(key);
   cache.delete(key);
   cache.set(key, tile);
+  if (!existed) indexAdd(key);
   const limit = cap();
   let overshoot = cache.size - limit;
   if (overshoot > 0) {
     for (const oldKey of cache.keys()) {
       cache.delete(oldKey);
+      indexRemove(oldKey);
       overshoot -= 1;
       if (overshoot <= 0) break;
     }
@@ -101,6 +138,7 @@ export function putTile(key: string, tile: TileCanvas): void {
 
 export function clearCache(): void {
   cache.clear();
+  zoomLevelCounts.clear();
 }
 
 export function cacheSize(): number {
@@ -315,19 +353,16 @@ function candidateTileRange(
   };
 }
 
-// Distinct cached zoom levels for the current signature (cheap key scan).
-function listCachedZoomLevels(signature: string): number[] {
-  const prefix = `${signature}#`;
-  const levels = new Set<number>();
-  for (const key of cache.keys()) {
-    if (!key.startsWith(prefix)) continue;
-    const rest = key.slice(prefix.length);
-    const hash = rest.indexOf('#');
-    if (hash < 0) continue;
-    const z = Number(rest.slice(0, hash));
-    if (Number.isFinite(z)) levels.add(z);
+// Distinct cached zoom levels. Reads the maintained zoom-level index (O(levels))
+// rather than scanning the whole cache. The cache holds a single signature at a
+// time, so every indexed level belongs to the current signature.
+function listCachedZoomLevels(): number[] {
+  const levels: number[] = [];
+  for (const zk of zoomLevelCounts.keys()) {
+    const z = Number(zk);
+    if (Number.isFinite(z)) levels.push(z);
   }
-  return [...levels];
+  return levels;
 }
 
 // Fraction of the target viewport covered by cached tiles at `candidateZoom`.
@@ -367,24 +402,25 @@ function pickBestCachedZoom(
   const notExcluded = (z: number) => excludeKey === null || zoomKey(z) !== excludeKey;
   const candidates = (opts.depthMode === 'exact'
     ? [targetZoom]
-    : listCachedZoomLevels(signature).filter((z) => {
+    : listCachedZoomLevels().filter((z) => {
         if (opts.depthMode === 'unlimited') return true;
         return Math.abs(Math.log2(z / targetZoom)) <= opts.maxOctaves;
       })
   ).filter(notExcluded);
 
-  let bestZoom: number | null = null;
-  let bestDist = Infinity;
+  // Check candidates nearest-first (by octave distance) and return the first one
+  // that meets the coverage threshold. The nearest qualifying level is always
+  // the best, so there is no need to measure coverage for farther levels — this
+  // avoids an O(levels × tiles) scan on every zoom-out wheel tick.
+  candidates.sort(
+    (a, b) => Math.abs(Math.log2(a / targetZoom)) - Math.abs(Math.log2(b / targetZoom)),
+  );
   for (const z of candidates) {
     const { covered, total } = candidateCoverage(view, width, height, z, signature);
     if (total === 0 || covered / total < opts.minCoverage) continue;
-    const dist = Math.abs(Math.log2(z / targetZoom));
-    if (dist < bestDist) {
-      bestDist = dist;
-      bestZoom = z;
-    }
+    return z;
   }
-  return bestZoom;
+  return null;
 }
 
 // Assemble a `width×height` canvas depicting `view` from cached tiles at

@@ -163,9 +163,11 @@ export function beginSmoothZoom(factor: number, screenX: number, screenY: number
     'exact' | 'limited' | 'unlimited';
   const maxOctaves = settingsEngine.getValue('zoomPreviewDepthOctaves') as number;
   const minCoverage = (settingsEngine.getValue('zoomPreviewMinCoverage') as number) / 100;
+  const previewStart = performance.now();
   const targetPreviewCanvas = isZoomingOut
     ? assembleBestCachedViewport(to, getWidth(), getHeight(), { depthMode, maxOctaves, minCoverage })
     : null;
+  const previewMs = performance.now() - previewStart;
   markDebug('zoom:smooth-begin', {
     factor: Number(factor.toPrecision(8)),
     screenX,
@@ -174,6 +176,7 @@ export function beginSmoothZoom(factor: number, screenX: number, screenY: number
     toZoom: Number(to.zoom.toPrecision(8)),
     isZoomingOut,
     targetCached: targetPreviewCanvas !== null,
+    previewMs: Number(previewMs.toFixed(2)),
     depthMode,
     minCoverage,
   });
