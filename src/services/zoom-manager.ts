@@ -22,6 +22,13 @@ function getZoomSensitivity(): number {
 export const zoomCallbacks = {
   onZoomStart: () => {},
   onZoomChange: (_focalX?: number, _focalY?: number) => {},
+  // Fires when a smooth-zoom's destination view is (re)computed — used to start
+  // a background render of the destination *during* the animation so its tiles
+  // are cached by the time the animation lands, instead of only after it ends.
+  onZoomTargetChange: (_view?: ViewState, _focalX?: number, _focalY?: number) => {},
+  // Fires when a smooth-zoom animation completes — used to present the
+  // in-flight destination render (promoting it) rather than starting a new one.
+  onZoomEnd: (_focalX?: number, _focalY?: number) => {},
 };
 
 // Projects `sourceCanvas` (rendered for `sourceView`) into the frame for
@@ -147,6 +154,10 @@ export function beginSmoothZoom(factor: number, screenX: number, screenY: number
   
   const animationToken = renderContext.zoomAnimationGeneration + 1;
   renderContext.zoomAnimationGeneration = animationToken;
+  // Each wheel tick's destination is computed from the current (possibly
+  // interpolated) view, so as the gesture keeps scrolling the destination keeps
+  // deepening — and onZoomTargetChange below starts rendering that destination
+  // *during* the animation rather than waiting for the wheel to stop.
   const from = { ...state.view };
   const to = computeTargetView(factor, screenX, screenY, from);
   const isZoomingOut = to.zoom < from.zoom;
@@ -246,13 +257,20 @@ export function beginSmoothZoom(factor: number, screenX: number, screenY: number
         markDebug('zoom:smooth-end', {
           targetZoom: Number(animation.to.zoom.toPrecision(8)),
         });
-        zoomCallbacks.onZoomChange(animation.originX, animation.originY); // triggers requestRender()      
+        zoomCallbacks.onZoomEnd(animation.originX, animation.originY); // presents the destination render
       } // <- Closes the inner 'if'
     } // <- Closes the outer 'else'
   };
 
   animation.frameId = requestAnimationFrame(step);
   state.zoomAnimation = animation;
+
+  // Kick off (or re-aim) a background render of the destination view now, while
+  // the 220 ms animation plays. Tiles compute + cache during the gesture, so the
+  // animation lands on crisp pixels instead of waiting for the render to start
+  // only after the wheel/click stops. The render does not paint to the canvas
+  // (it owns none of the screen); onZoomEnd promotes it once the gesture ends.
+  zoomCallbacks.onZoomTargetChange(to, screenX, screenY);
 }
 
 

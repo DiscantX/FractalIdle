@@ -53,6 +53,12 @@ type ActiveRender = {
   buildTask: (m: Miss) => WorkerTask;
   handleResult: (resp: WorkerResponse) => void;
   finalize: () => void;
+  // When false the render still computes + caches tiles (so the zoom animation
+  // can own the screen) but does not paint the assembly to the canvas. Flipped
+  // to true on zoom-animation completion to adopt the in-flight destination
+  // render (see promoteActiveRenderToPresent) instead of restarting it.
+  present: boolean;
+  presentNow: () => void;
 };
 
 let activeRender: ActiveRender | null = null;
@@ -233,10 +239,14 @@ export function endPanPreview() {
   requestRender();
 }
 
-export function requestRender(focalX?: number, focalY?: number) {
+export function requestRender(
+  focalX?: number,
+  focalY?: number,
+  opts?: { view?: ViewState; present?: boolean },
+) {
   state.activeRenderId += 1;
   markDebug('render:request', { nextRenderId: state.activeRenderId });
-  renderFrame(state.activeRenderId, focalX, focalY);
+  renderFrame(state.activeRenderId, focalX, focalY, opts);
 }
 
 // Draw the assembled canvas (cached tiles) onto the live canvas at the correct
@@ -253,7 +263,27 @@ function presentAssembly(assembled: ReturnType<typeof assembleFromCache>, view: 
   drawingContext.drawImage(assembled.assembly, Math.round(sx0), Math.round(sy0));
 }
 
-export function renderFrame(renderId: number, focalX?: number, focalY?: number) {
+// True when `b` differs from `a` enough to warrant a fresh render — more than a
+// pixel of pan in either axis, or a >2% zoom change. Used to decide whether a
+// finished pan render is already stale (the user kept moving) and should be
+// re-aimed at the current view.
+function viewDrifted(a: ViewState, b: ViewState): boolean {
+  const width = settingsEngine.getValue('width') as number;
+  const height = settingsEngine.getValue('height') as number;
+  const scaleRe = (4 / b.zoom) / width;
+  const scaleIm = ((4 / b.zoom) * (height / width)) / height;
+  const px = Math.abs(a.centerRe - b.centerRe) / scaleRe;
+  const py = Math.abs(a.centerIm - b.centerIm) / scaleIm;
+  const zoomRatio = Math.max(a.zoom, b.zoom) / Math.min(a.zoom, b.zoom);
+  return px > 1 || py > 1 || zoomRatio > 1.02;
+}
+
+export function renderFrame(
+  renderId: number,
+  focalX?: number,
+  focalY?: number,
+  opts?: { view?: ViewState; present?: boolean },
+) {
   // Clear cached tiles if a pixel-affecting setting changed since last render.
   ensureSignatureCurrent();
 
@@ -281,7 +311,11 @@ export function renderFrame(renderId: number, focalX?: number, focalY?: number) 
   const flipY = settingsEngine.getValue('flipY') as boolean;
 
   const signature = getRenderSignature();
-  const renderView = { ...state.view };
+  // A render may target an explicit view (the zoom animation's destination) that
+  // differs from the live `state.view`, or run without painting to the canvas so
+  // the zoom animation keeps screen ownership while tiles compute + cache.
+  const renderView = opts?.view ? { ...opts.view } : { ...state.view };
+  const present = opts?.present ?? true;
   const focusX = focalX ?? width / 2;
   const focusY = focalY ?? height / 2;
 
@@ -298,6 +332,16 @@ export function renderFrame(renderId: number, focalX?: number, focalY?: number) 
   const aScaleRe = assembled.scaleRe;
   const aScaleIm = assembled.scaleIm;
   const range = assembled.range;
+
+  // Paint the assembled (cached + resolved) tiles to the live canvas. `presentNow`
+  // is invoked directly when a background zoom render is promoted to presenting at
+  // animation completion. `paintLive` is used by handleResult/finalize (which run
+  // after `activeRender` is assigned) and honors the live flag so a background
+  // render (present=false) never paints — keeping the zoom animation on screen.
+  const presentNow = () => presentAssembly(assembled, state.view);
+  const paintLive = () => {
+    if (activeRender?.present) presentAssembly(assembled, state.view);
+  };
 
   // Screen offset of the assembly for the render-time view (used to place
   // the focal point in assembly-local coordinates for prioritization).
@@ -328,7 +372,7 @@ export function renderFrame(renderId: number, focalX?: number, focalY?: number) 
     } else {
       renderContext.panRenderScheduled = false;
     }
-    presentAssembly(assembled, state.view);
+    if (present) presentAssembly(assembled, state.view);
     return;
   }
 
@@ -336,7 +380,7 @@ export function renderFrame(renderId: number, focalX?: number, focalY?: number) 
   // frame, or the pan composite) stays as the backdrop and is progressively
   // replaced by crisp tiles — this is the "low-res preview snaps to high-res"
   // effect. Cached tiles are painted immediately on top.
-  presentAssembly(assembled, state.view);
+  if (present) presentAssembly(assembled, state.view);
 
   renderCallbacks.onRenderStart(renderId);
 
@@ -391,8 +435,9 @@ export function renderFrame(renderId: number, focalX?: number, focalY?: number) 
       markDebug('render:finalize-stale', undefined, renderId);
       return;
     }
-    // Draw the now-complete assembly as the final frame.
-    presentAssembly(assembled, state.view);
+    // Draw the now-complete assembly as the final frame (skipped for a
+    // background zoom render, which keeps the animation on screen until promoted).
+    paintLive();
     if (!renderContext.panActive) {
       state.lastRenderMs = performance.now() - start;
       state.lastSteps = totalSteps;
@@ -405,6 +450,16 @@ export function renderFrame(renderId: number, focalX?: number, focalY?: number) 
         ms: Number(state.lastRenderMs.toFixed(2)),
       }, renderId);
       renderCallbacks.onRenderComplete(renderView, state.lastRenderMs, totalSteps);
+    } else if (renderContext.panActive && viewDrifted(renderView, state.view)) {
+      // The user kept panning (or paused mid-drag) while this render was in
+      // flight, so the live view has moved past what we just computed. Keep the
+      // gate closed and immediately re-aim at the current view — a self-throttled
+      // chase loop (one render at a time) that keeps leading-edge tiles resolving
+      // during the drag instead of waiting for the button release. It terminates
+      // on its own once the view stops drifting (the next finalize sees no drift).
+      activeRender = null;
+      requestRender();
+      return;
     } else {
       // Re-open the scheduling gate so the next pan move can request a fill for
       // whatever new tiles it exposes.
@@ -432,8 +487,9 @@ export function renderFrame(renderId: number, focalX?: number, focalY?: number) 
     }
 
     // Repaint the whole assembly as a single image so adjacent tiles never
-    // show sub-pixel seams while the frame is still filling in.
-    presentAssembly(assembled, state.view);
+    // show sub-pixel seams while the frame is still filling in (skipped for a
+    // background zoom render, which keeps the animation on screen).
+    paintLive();
 
     if (completedChunks === 0) {
       // Time from render start to the first resolved tile — the "delay before
@@ -448,6 +504,20 @@ export function renderFrame(renderId: number, focalX?: number, focalY?: number) 
     periodicityShortCircuits += response.periodicityShortCircuits ?? 0;
   };
 
-  activeRender = { renderId, queue, outstanding: 0, buildTask, handleResult, finalize };
+  activeRender = { renderId, queue, outstanding: 0, buildTask, handleResult, finalize, present, presentNow };
   pump();
+}
+
+// Flip the in-flight render to presenting and paint its current assembly, so a
+// zoom animation can adopt the destination render it started instead of
+// discarding it and starting a fresh one. Returns false (and leaves the canvas
+// untouched) when no render is in flight, so callers can fall back to a normal
+// requestRender — which will find the just-computed tiles already cached.
+export function promoteActiveRenderToPresent(): boolean {
+  if (activeRender) {
+    activeRender.present = true;
+    activeRender.presentNow();
+    return true;
+  }
+  return false;
 }

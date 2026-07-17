@@ -1,6 +1,6 @@
 import { canvas } from './ui/dom';
 import { settingsEngine } from './settings/instance';
-import { requestRender, cancelActiveRender, warmPool, renderCallbacks } from './services/renderer';
+import { requestRender, cancelActiveRender, warmPool, renderCallbacks, promoteActiveRenderToPresent } from './services/renderer';
 import { zoomCallbacks } from './services/zoom-manager';
 import { loadSavedLogs, appendRenderLog, loggerCallbacks } from './services/logger';
 import { installDebugTools } from './utils/debug';
@@ -40,6 +40,25 @@ zoomCallbacks.onZoomStart = () => {
 
 zoomCallbacks.onZoomChange = (focalX, focalY) => {
   requestRender(focalX, focalY);
+};
+
+// Start a background render of the smooth-zoom destination *during* the
+// animation so its tiles are cached by the time it lands. It does not paint —
+// the animation keeps the screen — and onZoomEnd promotes it once the gesture
+// ends (falling back to a normal render only if it already finished).
+zoomCallbacks.onZoomTargetChange = (view, focalX, focalY) => {
+  if (view) {
+    requestRender(focalX, focalY, { view, present: false });
+  }
+};
+
+// Present the destination render that was started during the animation, adopting
+// the in-flight render rather than discarding it. If it already completed, a
+// normal render presents the now-cached frame immediately.
+zoomCallbacks.onZoomEnd = (focalX, focalY) => {
+  if (!promoteActiveRenderToPresent()) {
+    requestRender(focalX, focalY);
+  }
 };
 
 // Link log persistence events to UI counters
