@@ -98,6 +98,9 @@ export const coreSettings: SettingDefinition[] = [
     id: 'zoomPreviewMinCoverage', kind: 'slider', label: 'Zoom-out preview min coverage', section: 'zoom',
     default: 25, min: 0, max: 100, step: 5, rerender: false, format: (v) => `${v}%`,
   },
+  {
+    id: 'panPreviewFill', kind: 'checkbox', label: 'Pan preview fill', section: 'zoom', default: true, rerender: false,
+  },
 
   // --- View ---
   { id: 'flipX', kind: 'checkbox', label: 'Flip horizontally', section: 'view', default: false, rerender: true },

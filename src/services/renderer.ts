@@ -5,6 +5,7 @@ import { drawingContext } from '../ui/dom';
 import { markDebug } from '../utils/debug';
 import {
   assembleFromCache,
+  assembleBestCachedViewport,
   ensureSignatureCurrent,
   putTile,
   keyFor,
@@ -61,11 +62,34 @@ export function updatePanPreview() {
   const width = settingsEngine.getValue('width') as number;
   const height = settingsEngine.getValue('height') as number;
 
-  // Clear to placeholder, then paint all cached tiles for the current view.
-  // Uncovered (never-seen) area stays placeholder rather than smearing the
-  // previous frame — no ghost trails.
+  // Clear to placeholder, then build the frame in two layers:
+  //  1. Base: the nearest OTHER cached zoom level, scaled to this view, filling
+  //     newly-exposed area with real (if lower-res) pixels instead of the bare
+  //     placeholder — the same idea as the zoom-out preview, applied to panning.
+  //  2. Top: crisp cached tiles at the current exact zoom, drawn opaquely as a
+  //     single image over the base. Because the base covers the whole viewport
+  //     and the crisp tiles composite on top, there are no seams or gaps at the
+  //     boundary — the base only ever shows through where no exact tile exists.
   drawingContext.fillStyle = PREVIEW_PLACEHOLDER_COLOR;
   drawingContext.fillRect(0, 0, width, height);
+
+  if (settingsEngine.getValue('panPreviewFill') as boolean) {
+    const depthMode = settingsEngine.getValue('zoomPreviewDepthMode') as
+      'exact' | 'limited' | 'unlimited';
+    const maxOctaves = settingsEngine.getValue('zoomPreviewDepthOctaves') as number;
+    const minCoverage = (settingsEngine.getValue('zoomPreviewMinCoverage') as number) / 100;
+    const base = assembleBestCachedViewport(state.view, width, height, {
+      depthMode,
+      maxOctaves,
+      minCoverage,
+      excludeZoom: state.view.zoom,
+    });
+    if (base) {
+      drawingContext.imageSmoothingEnabled = false;
+      drawingContext.drawImage(base, 0, 0);
+    }
+  }
+
   const assembled = assembleFromCache(state.view, width, height, false);
   presentAssembly(assembled, state.view);
 

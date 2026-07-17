@@ -255,6 +255,13 @@ export type ZoomPreviewOptions = {
   maxOctaves: number;
   /** Minimum fraction (0..1) of the viewport a candidate must cover. */
   minCoverage: number;
+  /**
+   * Zoom level to exclude from candidate selection. Used by the pan-fill
+   * preview: the current exact zoom's crisp tiles are drawn on top separately,
+   * so the scaled base layer must come from a *different* cached level to fill
+   * the newly-exposed area rather than re-selecting the (gappy) current level.
+   */
+  excludeZoom?: number;
 };
 
 type CandidateTileRange = {
@@ -356,12 +363,15 @@ function pickBestCachedZoom(
 ): number | null {
   const signature = computeSignature();
   const targetZoom = view.zoom;
-  const candidates = opts.depthMode === 'exact'
+  const excludeKey = opts.excludeZoom !== undefined ? zoomKey(opts.excludeZoom) : null;
+  const notExcluded = (z: number) => excludeKey === null || zoomKey(z) !== excludeKey;
+  const candidates = (opts.depthMode === 'exact'
     ? [targetZoom]
     : listCachedZoomLevels(signature).filter((z) => {
         if (opts.depthMode === 'unlimited') return true;
         return Math.abs(Math.log2(z / targetZoom)) <= opts.maxOctaves;
-      });
+      })
+  ).filter(notExcluded);
 
   let bestZoom: number | null = null;
   let bestDist = Infinity;
