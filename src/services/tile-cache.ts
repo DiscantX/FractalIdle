@@ -821,14 +821,25 @@ export function assembleUniformColorViewport(
     }
   }
 
-  // Crisp overlay: the exact level's available tiles (partial ok) for progressive
-  // resolution. Skip when the base already IS the exact level. Gaps are allowed
-  // only when a base is under it; with no base, fill gaps opaquely (last resort,
-  // only right after a cache clear) so nothing stale shows through.
-  if (baseZoom === null || zoomKey(baseZoom) !== zoomKey(exactZoom)) {
-    const exact = assembleUniformLayer(view, width, height, exactZoom, params, painted);
-    if (exact) {
-      octx.drawImage(exact, 0, 0);
+  // Crisp overlay: the nearest cached level that is at least as deep as the live
+  // view (minZoom), so its tiles DOWNSCALE into place (crisp) rather than upscale
+  // (blocky). When the view sits exactly on a cached level (settled, or panning at
+  // a fixed zoom) this is that level — progressive per-tile resolution. DURING a
+  // smooth zoom the live zoom is an interpolated value between levels, so this
+  // instead grabs the destination / look-ahead level being rendered and downscales
+  // it — detail snaps in mid-glide instead of waiting for the zoom to land. Only a
+  // little coverage is required (0.01) so partial levels still contribute; gaps are
+  // punched transparent when a base sits under them.
+  const overlayZoom = pickBestCachedZoom(view, width, height, {
+    depthMode: 'unlimited',
+    maxOctaves: 32,
+    minCoverage: 0.01,
+    minZoom: exactZoom,
+  });
+  if (overlayZoom !== null && (baseZoom === null || zoomKey(overlayZoom) !== zoomKey(baseZoom))) {
+    const overlay = assembleUniformLayer(view, width, height, overlayZoom, params, painted);
+    if (overlay) {
+      octx.drawImage(overlay, 0, 0);
       painted = true;
     }
   }
