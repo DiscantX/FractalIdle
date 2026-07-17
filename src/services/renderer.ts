@@ -79,6 +79,8 @@ export function renderFrame(renderId: number, focalX?: number, focalY?: number) 
   const saturation = settingsEngine.getValue('saturation') as number;
   const lightness = settingsEngine.getValue('lightness') as number;
   const colorSpace = settingsEngine.getValue('colorSpace') as ColorSpace;
+  const flipX = settingsEngine.getValue('flipX') as boolean;
+  const flipY = settingsEngine.getValue('flipY') as boolean;
 
   const previousFrame = drawingContext.getImageData(0, 0, width, height);
   const start = performance.now();
@@ -222,6 +224,8 @@ export function renderFrame(renderId: number, focalX?: number, focalY?: number) 
       saturation: saturation,
       lightness: lightness,
       colorSpace: colorSpace,
+      flipX: flipX,
+      flipY: flipY,
     });
   };
 

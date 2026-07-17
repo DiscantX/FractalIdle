@@ -5,6 +5,7 @@ export const SECTIONS: SettingSectionDefinition[] = [
   { id: 'fractal', title: 'Fractal' },
   { id: 'rendering', title: 'Rendering' },
   { id: 'zoom', title: 'Zoom' },
+  { id: 'view', title: 'View' },
   { id: 'color-palette', title: 'Color palette' },
   { id: 'palette-range', title: 'Palette range' },
   { id: 'adjust-colors', title: 'Adjust colors' },
@@ -75,6 +76,10 @@ export const coreSettings: SettingDefinition[] = [
     id: 'previewMode', kind: 'select', label: 'Preview mode', section: 'zoom', default: 'legacy', rerender: false,
     options: [{ value: 'legacy', label: 'Legacy preview' }, { value: 'current', label: 'Current' }],
   },
+
+  // --- View ---
+  { id: 'flipX', kind: 'checkbox', label: 'Flip horizontally', section: 'view', default: false, rerender: true },
+  { id: 'flipY', kind: 'checkbox', label: 'Flip vertically', section: 'view', default: false, rerender: true },
 
   // --- Color palette ---
   {

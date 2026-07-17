@@ -20,8 +20,8 @@ self.onmessage = (event: MessageEvent<WorkerTask>) => {
 
   for (let y = payload.rowStart; y < payload.rowEnd; y += 1) {
     for (let x = payload.colStart; x < payload.colEnd; x += 1) {
-      const cRe = centerRe + (x - payload.width / 2) * scaleRe;
-      const cIm = centerIm + (y - payload.height / 2) * scaleIm;
+      const cRe = centerRe + (payload.flipX ? -1 : 1) * (x - payload.width / 2) * scaleRe;
+      const cIm = centerIm + (payload.flipY ? -1 : 1) * (y - payload.height / 2) * scaleIm;
       let zRe = 0;
       let zIm = 0;
 

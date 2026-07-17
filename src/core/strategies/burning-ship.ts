@@ -25,8 +25,9 @@ export function escapeIterations(
   let checkPeriod = 10;
 
   while (iter < maxIterations && (zRe * zRe + zIm * zIm) < escapeRadiusSquared) {
-    const nextRe = (Math.abs(zRe) * Math.abs(zRe) - Math.abs(zIm) * Math.abs(zIm) + cRe);
-    const nextIm = (Math.abs(zRe) * Math.abs(zIm) - Math.abs(zRe) * Math.abs(zIm) + cIm);
+    // Burning Ship: z' = (|x| + i|y|)² + c  →  x' = x² - y² + cRe,  y' = 2|x||y| + cIm
+    const nextRe = zRe * zRe - zIm * zIm + cRe;
+    const nextIm = 2 * Math.abs(zRe) * Math.abs(zIm) + cIm;
     zRe = nextRe;
     zIm = nextIm;
 

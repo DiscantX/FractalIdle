@@ -86,6 +86,8 @@ export type WorkerTask = {
   interiorDetail: boolean;
   interiorNoiseMode: 'single' | 'fractal';
   interiorNoiseStrength: number;
+  flipX: boolean;
+  flipY: boolean;
 };
 
 export type WorkerResponse = {
