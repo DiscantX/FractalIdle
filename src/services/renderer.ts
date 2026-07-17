@@ -6,6 +6,7 @@ import { markDebug } from '../utils/debug';
 import {
   assembleFromCache,
   assembleBestCachedViewport,
+  collectLayerMisses,
   ensureSignatureCurrent,
   putTile,
   keyFor,
@@ -42,16 +43,40 @@ let poolWorkers: Worker[] = [];
 let poolFractalType: FractalType | null = null;
 const idleWorkers = new Set<Worker>();
 
-type Miss = { col: number; row: number; i: number; j: number };
+// A tile to compute, tagged with the render layer it belongs to. A single render
+// spans one primary layer (the destination view, which paints) plus zero or more
+// look-ahead layers (anticipated future zoom levels, which only populate the
+// cache). Every queued tile carries its layer so a worker reply can be routed
+// back to the right geometry — see the worker→task map below.
+type QueuedTile = { layer: RenderLayer; col: number; row: number; i: number; j: number };
+
+// Per-layer geometry. `primary` layers own an assembly canvas and paint to screen;
+// look-ahead layers have no assembly and only putTile into the cache.
+type RenderLayer = {
+  primary: boolean;
+  zoom: number;
+  assemblyCenterRe: number;
+  assemblyCenterIm: number;
+  assemblyWidth: number;
+  assemblyHeight: number;
+  scaleRe: number;
+  scaleIm: number;
+  tileW: number;
+  tileH: number;
+  range: { colStart: number; rowStart: number };
+  assembly?: HTMLCanvasElement;
+  actx?: CanvasRenderingContext2D | null;
+};
 
 // The render currently accepting tile results. Each render installs a fresh job
 // here; the pool's persistent message handlers route completed tiles to it.
 type ActiveRender = {
   renderId: number;
-  queue: Miss[];
+  queue: QueuedTile[];
   outstanding: number;
-  buildTask: (m: Miss) => WorkerTask;
-  handleResult: (resp: WorkerResponse) => void;
+  buildTask: (q: QueuedTile) => WorkerTask;
+  handleResult: (q: QueuedTile, resp: WorkerResponse) => void;
+  handleDropped: (q: QueuedTile) => void;
   finalize: () => void;
   // When false the render still computes + caches tiles (so the zoom animation
   // can own the screen) but does not paint the assembly to the canvas. Flipped
@@ -63,16 +88,24 @@ type ActiveRender = {
 
 let activeRender: ActiveRender | null = null;
 
+// Which tile each worker is currently computing. Set on dispatch in pump(), read
+// on reply — this routes a WorkerResponse back to its layer without adding a layer
+// id to the worker protocol (a worker holds exactly one task at a time, and is
+// only re-dispatched after it replies, so this mapping is always 1:1 and current).
+const workerTask = new Map<Worker, QueuedTile>();
+
 function handleWorkerMessage(worker: Worker, event: MessageEvent<WorkerResponse>) {
   idleWorkers.add(worker);
   const ar = activeRender;
   const resp = event.data;
+  const q = workerTask.get(worker);
+  workerTask.delete(worker);
   // Accept a tile only if it belongs to the current, still-active render. A
   // pooled worker may deliver a tile from a cancelled or superseded render (it
   // was still computing when we moved on); those results are dropped here.
-  if (ar && resp.renderId === ar.renderId && ar.renderId === state.activeRenderId) {
+  if (ar && q && resp.renderId === ar.renderId && ar.renderId === state.activeRenderId) {
     ar.outstanding -= 1;
-    ar.handleResult(resp);
+    ar.handleResult(q, resp);
   } else {
     markDebug('render:tile-stale', { responseRenderId: resp.renderId });
   }
@@ -82,12 +115,13 @@ function handleWorkerMessage(worker: Worker, event: MessageEvent<WorkerResponse>
 function handleWorkerError(worker: Worker) {
   idleWorkers.add(worker);
   const ar = activeRender;
-  // We can't tell which task failed from an error event, so conservatively drop
-  // one outstanding task for the active render (the tile is skipped) so the
-  // render can still reach completion. This matches the prior behavior of not
-  // re-queuing failed tiles.
-  if (ar && ar.renderId === state.activeRenderId && ar.outstanding > 0) {
+  const q = workerTask.get(worker);
+  workerTask.delete(worker);
+  // The task failed; skip its tile but still account for it so the render can
+  // reach completion (matches the prior behavior of not re-queuing failed tiles).
+  if (ar && q && ar.renderId === state.activeRenderId && ar.outstanding > 0) {
     ar.outstanding -= 1;
+    ar.handleDropped(q);
   }
   pump();
 }
@@ -102,9 +136,10 @@ function pump() {
   while (idleWorkers.size > 0 && ar.queue.length > 0) {
     const worker = idleWorkers.values().next().value as Worker;
     idleWorkers.delete(worker);
-    const m = ar.queue.shift() as Miss;
+    const q = ar.queue.shift() as QueuedTile;
     ar.outstanding += 1;
-    worker.postMessage(ar.buildTask(m));
+    workerTask.set(worker, q);
+    worker.postMessage(ar.buildTask(q));
   }
   if (ar.queue.length === 0 && ar.outstanding === 0) {
     ar.finalize();
@@ -242,7 +277,7 @@ export function endPanPreview() {
 export function requestRender(
   focalX?: number,
   focalY?: number,
-  opts?: { view?: ViewState; present?: boolean },
+  opts?: { view?: ViewState; present?: boolean; lookAhead?: ViewState[] },
 ) {
   state.activeRenderId += 1;
   markDebug('render:request', { nextRenderId: state.activeRenderId });
@@ -282,7 +317,7 @@ export function renderFrame(
   renderId: number,
   focalX?: number,
   focalY?: number,
-  opts?: { view?: ViewState; present?: boolean },
+  opts?: { view?: ViewState; present?: boolean; lookAhead?: ViewState[] },
 ) {
   // Clear cached tiles if a pixel-affecting setting changed since last render.
   ensureSignatureCurrent();
@@ -316,6 +351,7 @@ export function renderFrame(
   // the zoom animation keeps screen ownership while tiles compute + cache.
   const renderView = opts?.view ? { ...opts.view } : { ...state.view };
   const present = opts?.present ?? true;
+  const lookAhead = opts?.lookAhead ?? [];
   const focusX = focalX ?? width / 2;
   const focusY = focalY ?? height / 2;
 
@@ -327,87 +363,157 @@ export function renderFrame(
   const workerCount = Math.max(1, Math.min(8, workerCountSetting));
   ensurePool(fractalType, workerCount);
 
+  // Layer 0 is the primary (destination) view: it owns the assembly canvas and
+  // paints to screen. Subsequent layers are look-ahead prerender targets — they
+  // only populate the cache (no assembly, no paint), using spare worker capacity.
   const assembled = assembleFromCache(renderView, width, height, true);
-  const { assembly, assemblyCenterRe, assemblyCenterIm, assemblyWidth, assemblyHeight, tileW, tileH } = assembled;
-  const aScaleRe = assembled.scaleRe;
-  const aScaleIm = assembled.scaleIm;
-  const range = assembled.range;
+  const primaryLayer: RenderLayer = {
+    primary: true,
+    zoom: renderView.zoom,
+    assemblyCenterRe: assembled.assemblyCenterRe,
+    assemblyCenterIm: assembled.assemblyCenterIm,
+    assemblyWidth: assembled.assemblyWidth,
+    assemblyHeight: assembled.assemblyHeight,
+    scaleRe: assembled.scaleRe,
+    scaleIm: assembled.scaleIm,
+    tileW: assembled.tileW,
+    tileH: assembled.tileH,
+    range: { colStart: assembled.range.colStart, rowStart: assembled.range.rowStart },
+    assembly: assembled.assembly,
+    actx: assembled.assembly.getContext('2d'),
+  };
+  if (primaryLayer.actx) primaryLayer.actx.imageSmoothingEnabled = false;
+
+  // Combined queue: primary tiles first (focal-sorted so the interesting region
+  // resolves first and the screen view appears ASAP), then each look-ahead layer
+  // in order. FCFS dispatch means the primary always consumes workers before any
+  // look-ahead tile — look-ahead only runs on spare capacity. Declared up front
+  // because the look-ahead layers built below push their misses into it as they
+  // go, keeping the primary first.
+  const queue: QueuedTile[] = [];
+
+  // Screen offset of the primary assembly (used to place the focal point in
+  // assembly-local coordinates for prioritization).
+  const renderSx0 =
+    (primaryLayer.assemblyCenterRe - renderView.centerRe) / primaryLayer.scaleRe +
+    (width - primaryLayer.assemblyWidth) / 2;
+  const renderSy0 =
+    (primaryLayer.assemblyCenterIm - renderView.centerIm) / primaryLayer.scaleIm +
+    (height - primaryLayer.assemblyHeight) / 2;
+  const focalLocalX = focusX - renderSx0;
+  const focalLocalY = focusY - renderSy0;
 
   // Paint the assembled (cached + resolved) tiles to the live canvas. `presentNow`
   // is invoked directly when a background zoom render is promoted to presenting at
   // animation completion. `paintLive` is used by handleResult/finalize (which run
   // after `activeRender` is assigned) and honors the live flag so a background
   // render (present=false) never paints — keeping the zoom animation on screen.
-  const presentNow = () => presentAssembly(assembled, state.view);
+  const presentNow = () => {
+    if (present) presentAssembly(assembled, state.view);
+  };
   const paintLive = () => {
     if (activeRender?.present) presentAssembly(assembled, state.view);
   };
 
-  // Screen offset of the assembly for the render-time view (used to place
-  // the focal point in assembly-local coordinates for prioritization).
-  const renderSx0 =
-    (assemblyCenterRe - renderView.centerRe) / aScaleRe + (width - assemblyWidth) / 2;
-  const renderSy0 =
-    (assemblyCenterIm - renderView.centerIm) / aScaleIm + (height - assemblyHeight) / 2;
-  const focalLocalX = focusX - renderSx0;
-  const focalLocalY = focusY - renderSy0;
-
-  // Prioritize tiles nearest the focal point (zoom/click center) so the
-  // interesting region resolves first; dispatch is FCFS so ordering the
-  // queue here is sufficient.
-  const queue = assembled.misses.slice().sort((a, b) => {
-    const da = (a.i * tileW + tileW / 2 - focalLocalX) ** 2 + (a.j * tileH + tileH / 2 - focalLocalY) ** 2;
-    const db = (b.i * tileW + tileW / 2 - focalLocalX) ** 2 + (b.j * tileH + tileH / 2 - focalLocalY) ** 2;
+  // Primary (screen) layer goes FIRST in the queue, focal-sorted so the
+  // interesting region resolves first. FCFS dispatch then gives the primary
+  // every worker before any look-ahead tile — look-ahead only runs on spare
+  // capacity. (Look-ahead is appended below, AFTER the primary, so it can never
+  // starve the screen view.)
+  const primaryMisses = assembled.misses.slice().sort((a, b) => {
+    const da = (a.i * primaryLayer.tileW + primaryLayer.tileW / 2 - focalLocalX) ** 2 +
+      (a.j * primaryLayer.tileH + primaryLayer.tileH / 2 - focalLocalY) ** 2;
+    const db = (b.i * primaryLayer.tileW + primaryLayer.tileW / 2 - focalLocalX) ** 2 +
+      (b.j * primaryLayer.tileH + primaryLayer.tileH / 2 - focalLocalY) ** 2;
     return da - db;
   });
+  for (const m of primaryMisses) queue.push({ layer: primaryLayer, ...m });
 
-  const hasWork = queue.length > 0;
-
-  // No tiles to compute: present cached tiles immediately, no workers.
-  if (!hasWork) {
-    activeRender = null;
-    if (!renderContext.panActive) {
-      state.lastRenderMs = performance.now() - start;
-      renderCallbacks.onRenderComplete(renderView, state.lastRenderMs, 0);
-    } else {
-      renderContext.panRenderScheduled = false;
-    }
-    if (present) presentAssembly(assembled, state.view);
-    return;
+  // Look-ahead layers appended AFTER the primary: each anticipated future zoom
+  // level's misses, in order. They only consume spare worker capacity once the
+  // primary screen view is satisfied.
+  const lookAheadLayers: RenderLayer[] = [];
+  for (const v of lookAhead) {
+    const lm = collectLayerMisses(v, width, height);
+    const layer: RenderLayer = {
+      primary: false,
+      zoom: v.zoom,
+      assemblyCenterRe: lm.assemblyCenterRe,
+      assemblyCenterIm: lm.assemblyCenterIm,
+      assemblyWidth: lm.assemblyWidth,
+      assemblyHeight: lm.assemblyHeight,
+      scaleRe: lm.scaleRe,
+      scaleIm: lm.scaleIm,
+      tileW: lm.tileW,
+      tileH: lm.tileH,
+      range: { colStart: lm.range.colStart, rowStart: lm.range.rowStart },
+    };
+    lookAheadLayers.push(layer);
+    for (const m of lm.misses) queue.push({ layer, ...m });
   }
 
-  // Do NOT clear the canvas: the existing content (a zoom preview, the prior
-  // frame, or the pan composite) stays as the backdrop and is progressively
-  // replaced by crisp tiles — this is the "low-res preview snaps to high-res"
-  // effect. Cached tiles are painted immediately on top.
+  const primaryTotal = primaryMisses.length;
+  const hasWork = queue.length > 0;
+
+  // Build + paint the primary assembly up front (cached tiles show immediately;
+  // the rest fill in progressively). Skipped for a background zoom render.
   if (present) presentAssembly(assembled, state.view);
 
   renderCallbacks.onRenderStart(renderId);
 
-  const totalChunks = queue.length;
-  let completedChunks = 0;
+  let primaryDone = 0;
+  let primaryComplete = false;
   let totalSteps = 0;
   let solidGuessedChunks = 0;
   let culledPixels = 0;
   let periodicityShortCircuits = 0;
 
-  const actx = assembly.getContext('2d');
-  if (actx) actx.imageSmoothingEnabled = false;
+  // Fire once when the primary (screen) layer is fully resolved: present it and
+  // record timing. The render stays alive through any remaining look-ahead tiles
+  // so they still land in the cache (and aren't dropped as stale).
+  const firePrimaryComplete = () => {
+    if (primaryComplete || renderId !== state.activeRenderId) return;
+    primaryComplete = true;
+    if (!renderContext.panActive) {
+      state.lastRenderMs = performance.now() - start;
+      state.lastSteps = totalSteps;
+      markDebug('render:finish', {
+        primaryTotal,
+        solidGuessedChunks,
+        culledPixels,
+        periodicityShortCircuits,
+        ms: Number(state.lastRenderMs.toFixed(2)),
+      }, renderId);
+      renderCallbacks.onRenderComplete(renderView, state.lastRenderMs, totalSteps);
+    } else if (renderContext.panActive && viewDrifted(renderView, state.view)) {
+      // The user kept panning (or paused mid-drag) while this render was in
+      // flight, so the live view has moved past what we just computed. Keep the
+      // gate closed and immediately re-aim at the current view — a self-throttled
+      // chase loop (one render at a time) that keeps leading-edge tiles resolving
+      // during the drag instead of waiting for the button release. It terminates
+      // on its own once the view stops drifting (the next finalize sees no drift).
+      requestRender();
+    } else {
+      // Re-open the scheduling gate so the next pan move can request a fill for
+      // whatever new tiles it exposes.
+      renderContext.panRenderScheduled = false;
+    }
+  };
 
-  const buildTask = (m: Miss): WorkerTask => ({
+  const buildTask = (q: QueuedTile): WorkerTask => ({
     renderId,
-    width: assemblyWidth,
-    height: assemblyHeight,
+    width: q.layer.assemblyWidth,
+    height: q.layer.assemblyHeight,
     maxIterations,
-    centerRe: assemblyCenterRe,
-    centerIm: assemblyCenterIm,
-    zoom: renderView.zoom,
-    rowStart: m.j * tileH,
-    rowEnd: m.j * tileH + tileH,
-    colStart: m.i * tileW,
-    colEnd: m.i * tileW + tileW,
-    scaleRe: aScaleRe,
-    scaleIm: aScaleIm,
+    centerRe: q.layer.assemblyCenterRe,
+    centerIm: q.layer.assemblyCenterIm,
+    zoom: q.layer.zoom,
+    rowStart: q.j * q.layer.tileH,
+    rowEnd: q.j * q.layer.tileH + q.layer.tileH,
+    colStart: q.i * q.layer.tileW,
+    colEnd: q.i * q.layer.tileW + q.layer.tileW,
+    scaleRe: q.layer.scaleRe,
+    scaleIm: q.layer.scaleIm,
     solidGuessing,
     geometricCulling,
     periodicityChecking,
@@ -435,76 +541,62 @@ export function renderFrame(
       markDebug('render:finalize-stale', undefined, renderId);
       return;
     }
-    // Draw the now-complete assembly as the final frame (skipped for a
-    // background zoom render, which keeps the animation on screen until promoted).
+    // Last paint of the finished primary frame (a background zoom render skips it
+    // until promoted). Look-ahead tiles were cache-only and need no paint.
     paintLive();
-    if (!renderContext.panActive) {
-      state.lastRenderMs = performance.now() - start;
-      state.lastSteps = totalSteps;
-      markDebug('render:finish', {
-        completedChunks,
-        totalChunks,
-        solidGuessedChunks,
-        culledPixels,
-        periodicityShortCircuits,
-        ms: Number(state.lastRenderMs.toFixed(2)),
-      }, renderId);
-      renderCallbacks.onRenderComplete(renderView, state.lastRenderMs, totalSteps);
-    } else if (renderContext.panActive && viewDrifted(renderView, state.view)) {
-      // The user kept panning (or paused mid-drag) while this render was in
-      // flight, so the live view has moved past what we just computed. Keep the
-      // gate closed and immediately re-aim at the current view — a self-throttled
-      // chase loop (one render at a time) that keeps leading-edge tiles resolving
-      // during the drag instead of waiting for the button release. It terminates
-      // on its own once the view stops drifting (the next finalize sees no drift).
-      activeRender = null;
-      requestRender();
-      return;
-    } else {
-      // Re-open the scheduling gate so the next pan move can request a fill for
-      // whatever new tiles it exposes.
-      renderContext.panRenderScheduled = false;
-    }
     if (activeRender && activeRender.renderId === renderId) activeRender = null;
   };
 
-  const handleResult = (response: WorkerResponse) => {
-    const i = Math.round(response.colStart / tileW);
-    const j = Math.round(response.rowStart / tileH);
-    const col = range.colStart + i;
-    const row = range.rowStart + j;
+  const handleResult = (q: QueuedTile, response: WorkerResponse) => {
+    const layer = q.layer;
+    const col = layer.range.colStart + q.i;
+    const row = layer.range.rowStart + q.j;
 
-    // Store the tile in the cache (world-keyed) for instant reuse on return,
-    // and blit it into the assembly at its integer grid slot.
+    // Store the tile in the cache (world-keyed by its own zoom) for instant reuse
+    // when the live zoom reaches this level. Primary tiles also blit into the
+    // assembly and repaint; look-ahead tiles are cache-only.
     const tileCanvas = document.createElement('canvas');
-    tileCanvas.width = tileW;
-    tileCanvas.height = tileH;
+    tileCanvas.width = layer.tileW;
+    tileCanvas.height = layer.tileH;
     const tctx = tileCanvas.getContext('2d');
     if (tctx) {
-      tctx.putImageData(new ImageData(new Uint8ClampedArray(response.data), tileW, tileH), 0, 0);
-      putTile(keyFor(signature, renderView.zoom, col, row), tileCanvas);
-      if (actx) actx.drawImage(tileCanvas, i * tileW, j * tileH);
+      tctx.putImageData(new ImageData(new Uint8ClampedArray(response.data), layer.tileW, layer.tileH), 0, 0);
+      putTile(keyFor(signature, layer.zoom, col, row), tileCanvas);
+      if (layer.primary && layer.actx) {
+        layer.actx.drawImage(tileCanvas, q.i * layer.tileW, q.j * layer.tileH);
+      }
     }
 
-    // Repaint the whole assembly as a single image so adjacent tiles never
-    // show sub-pixel seams while the frame is still filling in (skipped for a
-    // background zoom render, which keeps the animation on screen).
-    paintLive();
-
-    if (completedChunks === 0) {
-      // Time from render start to the first resolved tile — the "delay before
-      // anything appears" that a warm pool is meant to eliminate.
-      markDebug('render:first-tile', { ms: Number((performance.now() - start).toFixed(2)) }, renderId);
+    if (layer.primary) {
+      paintLive();
+      if (primaryDone === 0) {
+        markDebug('render:first-tile', { ms: Number((performance.now() - start).toFixed(2)) }, renderId);
+      }
+      totalSteps += response.steps;
+      solidGuessedChunks += response.solidGuessed ? 1 : 0;
+      culledPixels += response.culledPixels ?? 0;
+      periodicityShortCircuits += response.periodicityShortCircuits ?? 0;
+      primaryDone += 1;
+      if (primaryDone >= primaryTotal) firePrimaryComplete();
     }
-
-    totalSteps += response.steps;
-    completedChunks += 1;
-    if (response.solidGuessed) solidGuessedChunks += 1;
-    culledPixels += response.culledPixels ?? 0;
-    periodicityShortCircuits += response.periodicityShortCircuits ?? 0;
   };
 
-  activeRender = { renderId, queue, outstanding: 0, buildTask, handleResult, finalize, present, presentNow };
+  const handleDropped = (q: QueuedTile) => {
+    if (q.layer.primary) {
+      primaryDone += 1;
+      if (primaryDone >= primaryTotal) firePrimaryComplete();
+    }
+  };
+
+  // No work at all (fully cached, no look-ahead): present + complete immediately.
+  if (!hasWork) {
+    paintLive();
+    firePrimaryComplete();
+    if (activeRender && activeRender.renderId === renderId) activeRender = null;
+    return;
+  }
+
+  activeRender = { renderId, queue, outstanding: 0, buildTask, handleResult, handleDropped, finalize, present, presentNow };
   pump();
 }
 

@@ -284,6 +284,64 @@ export function assembleFromCache(
   };
 }
 
+// Geometry + uncached-tile list for a view, WITHOUT allocating or blitting an
+// assembly canvas. Used for look-ahead prerender layers, which only need to know
+// which tiles to compute (they are cached via putTile, never painted), so the
+// per-level canvas allocation that assembleFromCache does would be pure waste.
+export type LayerMisses = {
+  assemblyCenterRe: number;
+  assemblyCenterIm: number;
+  scaleRe: number;
+  scaleIm: number;
+  assemblyWidth: number;
+  assemblyHeight: number;
+  tileW: number;
+  tileH: number;
+  range: TileRange;
+  misses: Array<{ col: number; row: number; i: number; j: number }>;
+};
+
+export function collectLayerMisses(view: ViewState, width: number, height: number): LayerMisses {
+  const { scaleRe, scaleIm } = scaleForView(view, width, height);
+  const { tw, th } = tilePixelSize(width, height);
+  const range = visibleTileRange(view, width, height, tw, th);
+  const assemblyWidth = range.numTilesX * tw;
+  const assemblyHeight = range.numTilesY * th;
+
+  const signature = computeSignature();
+  const zoom = view.zoom;
+
+  const misses: LayerMisses['misses'] = [];
+  for (let j = 0; j < range.numTilesY; j += 1) {
+    for (let i = 0; i < range.numTilesX; i += 1) {
+      const col = range.colStart + i;
+      const row = range.rowStart + j;
+      // Peek only (no getTile) so this selection pass does not churn LRU order.
+      if (!cache.has(keyFor(signature, zoom, col, row))) {
+        misses.push({ col, row, i, j });
+      }
+    }
+  }
+
+  const tileWorldW = tw * scaleRe;
+  const tileWorldH = th * scaleIm;
+  const assemblyCenterRe = ((range.colStart + range.numTilesX) * tileWorldW + range.colStart * tileWorldW) / 2;
+  const assemblyCenterIm = ((range.rowStart + range.numTilesY) * tileWorldH + range.rowStart * tileWorldH) / 2;
+
+  return {
+    assemblyCenterRe,
+    assemblyCenterIm,
+    scaleRe,
+    scaleIm,
+    assemblyWidth,
+    assemblyHeight,
+    tileW: tw,
+    tileH: th,
+    range,
+    misses,
+  };
+}
+
 export type ZoomPreviewDepthMode = 'exact' | 'limited' | 'unlimited';
 
 export type ZoomPreviewOptions = {
@@ -300,6 +358,13 @@ export type ZoomPreviewOptions = {
    * the newly-exposed area rather than re-selecting the (gappy) current level.
    */
   excludeZoom?: number;
+  /**
+   * Only consider cached levels at or deeper than this zoom. Used by the
+   * crisp-in-scroll overlay: a level deeper than the live view downscales into
+   * place (crisp), while a shallower level would upscale (blocky) — so we forbid
+   * the latter, which otherwise pops a pixelated image over the smooth preview.
+   */
+  minZoom?: number;
 };
 
 type CandidateTileRange = {
@@ -400,13 +465,16 @@ function pickBestCachedZoom(
   const targetZoom = view.zoom;
   const excludeKey = opts.excludeZoom !== undefined ? zoomKey(opts.excludeZoom) : null;
   const notExcluded = (z: number) => excludeKey === null || zoomKey(z) !== excludeKey;
+  // Small tolerance so a level at (approximately) the current zoom still counts
+  // as "deep enough" — floating-point interpolation never lands exactly on it.
+  const deepEnough = (z: number) => opts.minZoom === undefined || z >= opts.minZoom * 0.999;
   const candidates = (opts.depthMode === 'exact'
     ? [targetZoom]
     : listCachedZoomLevels().filter((z) => {
         if (opts.depthMode === 'unlimited') return true;
         return Math.abs(Math.log2(z / targetZoom)) <= opts.maxOctaves;
       })
-  ).filter(notExcluded);
+  ).filter((z) => notExcluded(z) && deepEnough(z));
 
   // Check candidates nearest-first (by octave distance) and return the first one
   // that meets the coverage threshold. The nearest qualifying level is always

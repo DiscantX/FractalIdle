@@ -102,6 +102,29 @@ export const coreSettings: SettingDefinition[] = [
     id: 'panPreviewFill', kind: 'checkbox', label: 'Pan preview fill', section: 'zoom', default: true, rerender: false,
   },
   {
+    // Pre-cache the next zoom levels during a smooth zoom (on spare worker
+    // capacity) so continuous scrolling keeps landing on already-rendered tiles.
+    id: 'zoomLookAhead', kind: 'checkbox', label: 'Zoom look-ahead', section: 'zoom', default: true, rerender: false,
+  },
+  {
+    id: 'zoomLookAheadLevels', kind: 'number', label: 'Look-ahead levels', section: 'zoom',
+    default: 3, min: 0, max: 12, step: 1, rerender: false,
+    visibleWhen: (s) => s.zoomLookAhead === true,
+  },
+  {
+    id: 'zoomLookAheadSpacing', kind: 'select', label: 'Look-ahead spacing', section: 'zoom', default: 'step', rerender: false,
+    options: [
+      { value: 'step', label: 'Per scroll step' },
+      { value: 'octave', label: 'Per octave (×2)' },
+    ],
+    visibleWhen: (s) => s.zoomLookAhead === true,
+  },
+  {
+    // During a smooth zoom, overlay real cached tiles (from look-ahead / visited
+    // levels) on top of the blurry preview so detail snaps in mid-scroll.
+    id: 'crispInScroll', kind: 'checkbox', label: 'Crisp detail while zooming', section: 'zoom', default: true, rerender: false,
+  },
+  {
     // Optional optimization: re-warm the (persistent) worker pool at zoom start
     // so any pool rebuild — e.g. after a fractal-type change — overlaps the zoom
     // animation instead of blocking the render that lands after it. Safe to turn

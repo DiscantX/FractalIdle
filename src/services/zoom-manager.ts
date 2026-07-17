@@ -25,7 +25,9 @@ export const zoomCallbacks = {
   // Fires when a smooth-zoom's destination view is (re)computed — used to start
   // a background render of the destination *during* the animation so its tiles
   // are cached by the time the animation lands, instead of only after it ends.
-  onZoomTargetChange: (_view?: ViewState, _focalX?: number, _focalY?: number) => {},
+  // `lookAhead` carries anticipated future zoom levels (same focal point) so the
+  // renderer can pre-cache them on spare worker capacity.
+  onZoomTargetChange: (_view?: ViewState, _lookAhead?: ViewState[], _focalX?: number, _focalY?: number) => {},
   // Fires when a smooth-zoom animation completes — used to present the
   // in-flight destination render (promoting it) rather than starting a new one.
   onZoomEnd: (_focalX?: number, _focalY?: number) => {},
@@ -161,6 +163,23 @@ export function beginSmoothZoom(factor: number, screenX: number, screenY: number
   const from = { ...state.view };
   const to = computeTargetView(factor, screenX, screenY, from);
   const isZoomingOut = to.zoom < from.zoom;
+
+  // Look-ahead prerender targets (zoom-in only): chain `computeTargetView` from
+  // `to` using the same focal point, so each anticipated level is framed for the
+  // next scroll ticks. Pre-cached on spare worker capacity; when the live zoom
+  // reaches one, its tiles are a direct cache hit instead of a fresh render.
+  let lookAhead: ViewState[] = [];
+  if (!isZoomingOut && settingsEngine.getValue('zoomLookAhead') as boolean) {
+    const levels = Math.max(0, settingsEngine.getValue('zoomLookAheadLevels') as number);
+    const spacing = settingsEngine.getValue('zoomLookAheadSpacing') as 'step' | 'octave';
+    const stepFactor = spacing === 'octave' ? 2 : factor;
+    let base = to;
+    for (let n = 0; n < levels; n += 1) {
+      base = computeTargetView(stepFactor, screenX, screenY, base);
+      lookAhead.push(base);
+    }
+  }
+
   // Snapshot the current on-screen frame (which is composited from the tile
   // cache) at viewport resolution. Scaling this during the animation gives the
   // low-res-preview-snaps-to-high-res effect.
@@ -205,6 +224,29 @@ export function beginSmoothZoom(factor: number, screenX: number, screenY: number
     previewView: targetPreviewCanvas ? to : null,
   };
 
+  // Overlay real cached tiles from the nearest level that is at least as deep as
+  // the live view (so they DOWNSCALE into place — crisp — rather than upscaling
+  // into a blocky mess), on top of the blurry preview. During a zoom-in this is
+  // the destination `to` (and, as we pass it, the look-ahead levels), whose tiles
+  // fill in progressively via the background render — so detail sharpens in place
+  // as you scroll. No-op when the setting is off or nothing suitable is cached
+  // yet (then only the blurry preview shows, exactly as before).
+  const drawCrispOverlay = () => {
+    if (!(settingsEngine.getValue('crispInScroll') as boolean)) return;
+    const crisp = assembleBestCachedViewport(state.view, getWidth(), getHeight(), {
+      depthMode,
+      maxOctaves,
+      minCoverage,
+      minZoom: state.view.zoom,
+    });
+    if (crisp) {
+      drawingContext.save();
+      drawingContext.imageSmoothingEnabled = false;
+      drawingContext.drawImage(crisp, 0, 0);
+      drawingContext.restore();
+    }
+  };
+
   const step = (currentTime: number) => {
     if (renderContext.zoomAnimationGeneration !== animationToken || state.zoomAnimation !== animation) {
       return;
@@ -244,8 +286,15 @@ export function beginSmoothZoom(factor: number, screenX: number, screenY: number
       } else {
         drawZoomPreview(currentScale, animation.originX, animation.originY, animation.previewCanvas);
       }
+      // Crisp-in-scroll: overlay real cached tiles at the nearest available level
+      // (populated by look-ahead prerender) on TOP of the blurry preview, so
+      // detail visibly snaps in as the zoom passes through each pre-rendered
+      // level. Gaps fall through to the blurry layer below. Still just a scaled
+      // drawImage per frame — no per-frame worker render, so motion stays smooth.
+      drawCrispOverlay();
     } else {
       drawFallbackPreview();
+      drawCrispOverlay();
     }
 
     if (progress < 1) {
@@ -268,9 +317,10 @@ export function beginSmoothZoom(factor: number, screenX: number, screenY: number
   // Kick off (or re-aim) a background render of the destination view now, while
   // the 220 ms animation plays. Tiles compute + cache during the gesture, so the
   // animation lands on crisp pixels instead of waiting for the render to start
-  // only after the wheel/click stops. The render does not paint to the canvas
+  // only after the wheel/click stops. The render also pre-caches the look-ahead
+  // levels on spare worker capacity. The render does not paint to the canvas
   // (it owns none of the screen); onZoomEnd promotes it once the gesture ends.
-  zoomCallbacks.onZoomTargetChange(to, screenX, screenY);
+  zoomCallbacks.onZoomTargetChange(to, lookAhead, screenX, screenY);
 }
 
 
