@@ -96,7 +96,7 @@ export const coreSettings: SettingDefinition[] = [
   },
   {
     id: 'zoomPreviewMinCoverage', kind: 'slider', label: 'Zoom-out preview min coverage', section: 'zoom',
-    default: 25, min: 0, max: 100, step: 5, rerender: false, format: (v) => `${v}%`,
+    default: 100, min: 0, max: 100, step: 5, rerender: false, format: (v) => `${v}%`,
   },
   {
     id: 'panPreviewFill', kind: 'checkbox', label: 'Pan preview fill', section: 'zoom', default: true, rerender: false,
@@ -112,12 +112,30 @@ export const coreSettings: SettingDefinition[] = [
     visibleWhen: (s) => s.zoomLookAhead === true,
   },
   {
-    id: 'zoomLookAheadSpacing', kind: 'select', label: 'Look-ahead spacing', section: 'zoom', default: 'step', rerender: false,
+    id: 'zoomLookBehind', kind: 'checkbox', label: 'Zoom look-behind', section: 'zoom', default: true, rerender: false,
+  },
+  {
+    id: 'zoomLookBehindLevels', kind: 'number', label: 'Look-behind levels', section: 'zoom',
+    default: 2, min: 0, max: 12, step: 1, rerender: false,
+    visibleWhen: (s) => s.zoomLookBehind === true,
+  },
+  {
+    id: 'zoomLookAheadSpacing', kind: 'select', label: 'Look-ahead / behind spacing', section: 'zoom', default: 'step', rerender: false,
     options: [
       { value: 'step', label: 'Per scroll step' },
       { value: 'octave', label: 'Per octave (×2)' },
     ],
-    visibleWhen: (s) => s.zoomLookAhead === true,
+    visibleWhen: (s) => s.zoomLookAhead === true || s.zoomLookBehind === true,
+  },
+  {
+    id: 'zoomLookPriority', kind: 'select', label: 'Speculative order', section: 'zoom', default: 'direction', rerender: false,
+    options: [
+      { value: 'direction', label: 'Direction-aware (boost + interleave)' },
+      { value: 'ahead', label: 'Look-ahead first' },
+      { value: 'behind', label: 'Look-behind first' },
+      { value: 'distance', label: 'Balanced (distance interleave)' },
+    ],
+    visibleWhen: (s) => s.zoomLookAhead === true || s.zoomLookBehind === true,
   },
   {
     // During a smooth zoom, overlay real cached tiles (from look-ahead / visited

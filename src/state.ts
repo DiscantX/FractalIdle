@@ -46,4 +46,8 @@ export const renderContext = {
   // gate render scheduling during a drag.
   panActive: false,
   panRenderScheduled: false,
+  // Last zoom travel direction, set by zoom actions (smooth zoom, instant
+  // zoom, reset). Read by the renderer to bias speculative (look-ahead /
+  // look-behind) level ordering toward the direction the user is moving.
+  lastZoomDir: 'none' as 'in' | 'out' | 'none',
 };

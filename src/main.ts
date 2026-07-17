@@ -44,11 +44,12 @@ zoomCallbacks.onZoomChange = (focalX, focalY) => {
 
 // Start a background render of the smooth-zoom destination *during* the
 // animation so its tiles are cached by the time it lands. It also pre-caches the
-// look-ahead levels on spare worker capacity. The render does not paint — the
-// animation keeps the screen — and onZoomEnd promotes it once the gesture ends.
-zoomCallbacks.onZoomTargetChange = (view, lookAhead, focalX, focalY) => {
+// look-ahead and look-behind levels on spare worker capacity (spaced on this
+// gesture's step factor). The render does not paint — the animation keeps the
+// screen — and onZoomEnd promotes it once the gesture ends.
+zoomCallbacks.onZoomTargetChange = (view, stepFactor, focalX, focalY) => {
   if (view) {
-    requestRender(focalX, focalY, { view, present: false, lookAhead });
+    requestRender(focalX, focalY, { view, present: false, stepFactor });
   }
 };
 

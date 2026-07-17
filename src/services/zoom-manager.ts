@@ -25,9 +25,10 @@ export const zoomCallbacks = {
   // Fires when a smooth-zoom's destination view is (re)computed — used to start
   // a background render of the destination *during* the animation so its tiles
   // are cached by the time the animation lands, instead of only after it ends.
-  // `lookAhead` carries anticipated future zoom levels (same focal point) so the
-  // renderer can pre-cache them on spare worker capacity.
-  onZoomTargetChange: (_view?: ViewState, _lookAhead?: ViewState[], _focalX?: number, _focalY?: number) => {},
+  // `stepFactor` is the gesture's zoom factor; the renderer uses it to space the
+  // pre-cached (look-ahead / look-behind) levels on the same per-scroll-step
+  // grid during a gesture, so continued scrolling lands on cached tiles.
+  onZoomTargetChange: (_view?: ViewState, _stepFactor?: number, _focalX?: number, _focalY?: number) => {},
   // Fires when a smooth-zoom animation completes — used to present the
   // in-flight destination render (promoting it) rather than starting a new one.
   onZoomEnd: (_focalX?: number, _focalY?: number) => {},
@@ -164,21 +165,10 @@ export function beginSmoothZoom(factor: number, screenX: number, screenY: number
   const to = computeTargetView(factor, screenX, screenY, from);
   const isZoomingOut = to.zoom < from.zoom;
 
-  // Look-ahead prerender targets (zoom-in only): chain `computeTargetView` from
-  // `to` using the same focal point, so each anticipated level is framed for the
-  // next scroll ticks. Pre-cached on spare worker capacity; when the live zoom
-  // reaches one, its tiles are a direct cache hit instead of a fresh render.
-  let lookAhead: ViewState[] = [];
-  if (!isZoomingOut && settingsEngine.getValue('zoomLookAhead') as boolean) {
-    const levels = Math.max(0, settingsEngine.getValue('zoomLookAheadLevels') as number);
-    const spacing = settingsEngine.getValue('zoomLookAheadSpacing') as 'step' | 'octave';
-    const stepFactor = spacing === 'octave' ? 2 : factor;
-    let base = to;
-    for (let n = 0; n < levels; n += 1) {
-      base = computeTargetView(stepFactor, screenX, screenY, base);
-      lookAhead.push(base);
-    }
-  }
+  // Record the travel direction so the renderer can bias its speculative
+  // (look-ahead / look-behind) prerender ordering toward where the user is
+  // heading — the nearest level in this direction gets a first-step boost.
+  renderContext.lastZoomDir = isZoomingOut ? 'out' : 'in';
 
   // Snapshot the current on-screen frame (which is composited from the tile
   // cache) at viewport resolution. Scaling this during the animation gives the
@@ -318,13 +308,15 @@ export function beginSmoothZoom(factor: number, screenX: number, screenY: number
   // the 220 ms animation plays. Tiles compute + cache during the gesture, so the
   // animation lands on crisp pixels instead of waiting for the render to start
   // only after the wheel/click stops. The render also pre-caches the look-ahead
-  // levels on spare worker capacity. The render does not paint to the canvas
-  // (it owns none of the screen); onZoomEnd promotes it once the gesture ends.
-  zoomCallbacks.onZoomTargetChange(to, lookAhead, screenX, screenY);
+  // and look-behind levels (spaced on this gesture's step grid) on spare worker
+  // capacity. The render does not paint to the canvas (it owns none of the
+  // screen); onZoomEnd promotes it once the gesture ends.
+  zoomCallbacks.onZoomTargetChange(to, factor, screenX, screenY);
 }
 
 
 export function applyZoom(factor: number, screenX: number, screenY: number) {
+  renderContext.lastZoomDir = factor < 1 ? 'out' : 'in';
   const targetView = computeTargetView(factor, screenX, screenY, state.view);
   markDebug('zoom:instant', {
     factor: Number(factor.toPrecision(8)),
@@ -338,6 +330,7 @@ export function applyZoom(factor: number, screenX: number, screenY: number) {
 
 export function resetView() {
   cancelZoomAnimation();
+  renderContext.lastZoomDir = 'none';
   const fractalType = settingsEngine.getValue('fractalType') as FractalType;
   const defaultView = fractalDefaultViews[fractalType];
   state.view.centerRe = defaultView.centerRe;

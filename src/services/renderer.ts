@@ -12,6 +12,7 @@ import {
   keyFor,
   getRenderSignature,
 } from './tile-cache';
+import { computeTargetView } from './zoom-manager';
 
 export const renderCallbacks = {
   onRenderStart: (_renderId: number) => {},
@@ -45,8 +46,8 @@ const idleWorkers = new Set<Worker>();
 
 // A tile to compute, tagged with the render layer it belongs to. A single render
 // spans one primary layer (the destination view, which paints) plus zero or more
-// look-ahead layers (anticipated future zoom levels, which only populate the
-// cache). Every queued tile carries its layer so a worker reply can be routed
+// look-ahead / look-behind layers (anticipated zoom levels, which only populate
+// the cache). Every queued tile carries its layer so a worker reply can be routed
 // back to the right geometry — see the worker→task map below.
 type QueuedTile = { layer: RenderLayer; col: number; row: number; i: number; j: number };
 
@@ -277,7 +278,7 @@ export function endPanPreview() {
 export function requestRender(
   focalX?: number,
   focalY?: number,
-  opts?: { view?: ViewState; present?: boolean; lookAhead?: ViewState[] },
+  opts?: { view?: ViewState; present?: boolean; stepFactor?: number },
 ) {
   state.activeRenderId += 1;
   markDebug('render:request', { nextRenderId: state.activeRenderId });
@@ -313,11 +314,88 @@ function viewDrifted(a: ViewState, b: ViewState): boolean {
   return px > 1 || py > 1 || zoomRatio > 1.02;
 }
 
+// Merge look-ahead (deeper) and look-behind (shallower) view lists into the
+// speculative render order, per `policy`:
+//   'direction' (default): boost the nearest level in the current travel direction
+//     (zoom-in → nearest ahead; zoom-out → nearest behind), then interleave the
+//     rest by increasing distance, travel-first at each distance.
+//   'ahead' / 'behind': all of one side, then all of the other.
+//   'distance': pure distance interleave (ahead-first tie-break), ignoring travel
+//     direction — symmetric, for jumps where neither side is privileged.
+// FCFS dispatch below keeps these on spare worker capacity only — the primary
+// screen layer always comes first and consumes every worker before any of these.
+type SpeculativePolicy = 'direction' | 'ahead' | 'behind' | 'distance';
+
+function orderSpeculative(
+  ahead: ViewState[],
+  behind: ViewState[],
+  dir: 'in' | 'out' | 'none',
+  policy: SpeculativePolicy,
+): ViewState[] {
+  const ordered: ViewState[] = [];
+  const aN = ahead.length;
+  const bN = behind.length;
+
+  if (policy === 'ahead') {
+    for (const v of ahead) ordered.push(v);
+    for (const v of behind) ordered.push(v);
+    return ordered;
+  }
+  if (policy === 'behind') {
+    for (const v of behind) ordered.push(v);
+    for (const v of ahead) ordered.push(v);
+    return ordered;
+  }
+  if (policy === 'distance') {
+    // Symmetric interleave by distance, ahead-first tie-break, no boost.
+    const maxDist = Math.max(aN, bN);
+    let ai = 0;
+    let bi = 0;
+    for (let d = 1; d <= maxDist; d += 1) {
+      const aHere = ai === d - 1 && ai < aN;
+      const bHere = bi === d - 1 && bi < bN;
+      if (aHere) ordered.push(ahead[ai++]);
+      if (bHere) ordered.push(behind[bi++]);
+    }
+    return ordered;
+  }
+
+  // 'direction' (default): boost nearest travel-side level, then interleave.
+  let ai = 0;
+  let bi = 0;
+  if (dir === 'in' && aN > 0) {
+    ordered.push(ahead[0]);
+    ai = 1;
+  } else if (dir === 'out' && bN > 0) {
+    ordered.push(behind[0]);
+    bi = 1;
+  }
+  const maxDist = Math.max(aN, bN);
+  for (let d = 1; d <= maxDist; d += 1) {
+    const aHere = ai === d - 1 && ai < aN;
+    const bHere = bi === d - 1 && bi < bN;
+    if (aHere && bHere) {
+      if (dir === 'out') {
+        ordered.push(behind[bi++]);
+        ordered.push(ahead[ai++]);
+      } else {
+        ordered.push(ahead[ai++]);
+        ordered.push(behind[bi++]);
+      }
+    } else if (aHere) {
+      ordered.push(ahead[ai++]);
+    } else if (bHere) {
+      ordered.push(behind[bi++]);
+    }
+  }
+  return ordered;
+}
+
 export function renderFrame(
   renderId: number,
   focalX?: number,
   focalY?: number,
-  opts?: { view?: ViewState; present?: boolean; lookAhead?: ViewState[] },
+  opts?: { view?: ViewState; present?: boolean; stepFactor?: number },
 ) {
   // Clear cached tiles if a pixel-affecting setting changed since last render.
   ensureSignatureCurrent();
@@ -351,7 +429,7 @@ export function renderFrame(
   // the zoom animation keeps screen ownership while tiles compute + cache.
   const renderView = opts?.view ? { ...opts.view } : { ...state.view };
   const present = opts?.present ?? true;
-  const lookAhead = opts?.lookAhead ?? [];
+  const stepFactor = opts?.stepFactor;
   const focusX = focalX ?? width / 2;
   const focusY = focalY ?? height / 2;
 
@@ -364,8 +442,9 @@ export function renderFrame(
   ensurePool(fractalType, workerCount);
 
   // Layer 0 is the primary (destination) view: it owns the assembly canvas and
-  // paints to screen. Subsequent layers are look-ahead prerender targets — they
-  // only populate the cache (no assembly, no paint), using spare worker capacity.
+  // paints to screen. Subsequent layers are look-ahead / look-behind prerender
+  // targets — they only populate the cache (no assembly, no paint), using spare
+  // worker capacity.
   const assembled = assembleFromCache(renderView, width, height, true);
   const primaryLayer: RenderLayer = {
     primary: true,
@@ -429,27 +508,51 @@ export function renderFrame(
   });
   for (const m of primaryMisses) queue.push({ layer: primaryLayer, ...m });
 
-  // Look-ahead layers appended AFTER the primary: each anticipated future zoom
-  // level's misses, in order. They only consume spare worker capacity once the
-  // primary screen view is satisfied.
-  const lookAheadLayers: RenderLayer[] = [];
-  for (const v of lookAhead) {
-    const lm = collectLayerMisses(v, width, height);
-    const layer: RenderLayer = {
-      primary: false,
-      zoom: v.zoom,
-      assemblyCenterRe: lm.assemblyCenterRe,
-      assemblyCenterIm: lm.assemblyCenterIm,
-      assemblyWidth: lm.assemblyWidth,
-      assemblyHeight: lm.assemblyHeight,
-      scaleRe: lm.scaleRe,
-      scaleIm: lm.scaleIm,
-      tileW: lm.tileW,
-      tileH: lm.tileH,
-      range: { colStart: lm.range.colStart, rowStart: lm.range.rowStart },
-    };
-    lookAheadLayers.push(layer);
-    for (const m of lm.misses) queue.push({ layer, ...m });
+  // Speculative prerender layers (look-ahead = deeper, look-behind = shallower)
+  // appended AFTER the primary and consuming only spare worker capacity. Driven
+  // here (not only during a zoom gesture) so plain renders — a jump to a fresh
+  // location, a cache-clear, the initial load — also warm the surrounding levels,
+  // which the zoom-out preview and pan-fill fall back on. Skipped while an
+  // interactive pan is active (every drag frame is a plain render) to avoid churn.
+  if (!renderContext.panActive) {
+    const spacing = settingsEngine.getValue('zoomLookAheadSpacing') as 'step' | 'octave';
+    const wantAhead = settingsEngine.getValue('zoomLookAhead') as boolean;
+    const wantBehind = settingsEngine.getValue('zoomLookBehind') as boolean;
+    const aheadLevels = wantAhead ? Math.max(0, settingsEngine.getValue('zoomLookAheadLevels') as number) : 0;
+    const behindLevels = wantBehind ? Math.max(0, settingsEngine.getValue('zoomLookBehindLevels') as number) : 0;
+    // Per-scroll-step spacing during a gesture; octave (×2) on plain renders
+    // where no gesture factor is available.
+    const factorStep = spacing === 'octave' ? 2 : (stepFactor ?? 2);
+    const ahead: ViewState[] = [];
+    const behind: ViewState[] = [];
+    for (let n = 0; n < Math.max(aheadLevels, behindLevels); n += 1) {
+      if (n < aheadLevels) {
+        ahead.push(computeTargetView(factorStep, focusX, focusY, n === 0 ? renderView : ahead[n - 1]));
+      }
+      if (n < behindLevels) {
+        behind.push(computeTargetView(1 / factorStep, focusX, focusY, n === 0 ? renderView : behind[n - 1]));
+      }
+    }
+    // Order per the chosen policy — see orderSpeculative.
+    const policy = settingsEngine.getValue('zoomLookPriority') as SpeculativePolicy;
+    const ordered = orderSpeculative(ahead, behind, renderContext.lastZoomDir, policy);
+    for (const v of ordered) {
+      const lm = collectLayerMisses(v, width, height);
+      const layer: RenderLayer = {
+        primary: false,
+        zoom: v.zoom,
+        assemblyCenterRe: lm.assemblyCenterRe,
+        assemblyCenterIm: lm.assemblyCenterIm,
+        assemblyWidth: lm.assemblyWidth,
+        assemblyHeight: lm.assemblyHeight,
+        scaleRe: lm.scaleRe,
+        scaleIm: lm.scaleIm,
+        tileW: lm.tileW,
+        tileH: lm.tileH,
+        range: { colStart: lm.range.colStart, rowStart: lm.range.rowStart },
+      };
+      for (const m of lm.misses) queue.push({ layer, ...m });
+    }
   }
 
   const primaryTotal = primaryMisses.length;
