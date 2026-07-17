@@ -1,6 +1,6 @@
 import { ChunkMode, ColorMode, PaletteName, ColorSpace, ViewState, TileTask, WorkerResponse, FractalType, PanRegion } from '../types';
 import { settingsEngine } from '../settings/instance';
-import { state, renderContext } from '../state';
+import { state, renderContext, PREVIEW_PLACEHOLDER_COLOR } from '../state';
 import { drawingContext } from '../ui/dom';
 import { markDebug } from '../utils/debug';
 
@@ -53,36 +53,28 @@ function snapshotPanBase(imageData: ImageData, view: ViewState, width: number, h
   renderContext.panBaseView = { ...view };
 }
 
-function exposedRegion(dxPx: number, dyPx: number, width: number, height: number): PanRegion | null {
-  let x0 = 0;
-  let x1 = width;
-  let y0 = 0;
-  let y1 = height;
+function exposedRegions(dxPx: number, dyPy: number, width: number, height: number): PanRegion[] {
+  // The base, shifted by (dxPx, dyPy), fails to cover the destination along the
+  // axes it moved. For a pure translation the uncovered area is an L: one
+  // full-height strip on the leading horizontal edge plus one full-width strip
+  // on the leading vertical edge. Return each arm (1 or 2 rects) so the renderer
+  // fills exactly the newly-exposed cells - not the whole canvas, not a corner.
+  const regions: PanRegion[] = [];
+  if (dxPx === 0 && dyPy === 0) return regions;
 
   if (dxPx > 0) {
-    x0 = 0;
-    x1 = Math.ceil(dxPx);
+    regions.push({ x0: 0, y0: 0, x1: Math.ceil(dxPx), y1: height });
   } else if (dxPx < 0) {
-    x0 = Math.floor(width + dxPx);
-    x1 = width;
+    regions.push({ x0: Math.floor(width + dxPx), y0: 0, x1: width, y1: height });
   }
 
-  if (dyPx > 0) {
-    y0 = 0;
-    y1 = Math.ceil(dyPx);
-  } else if (dyPx < 0) {
-    y0 = Math.floor(height + dyPx);
-    y1 = height;
+  if (dyPy > 0) {
+    regions.push({ x0: 0, y0: 0, x1: width, y1: Math.ceil(dyPy) });
+  } else if (dyPy < 0) {
+    regions.push({ x0: 0, y0: Math.floor(height + dyPy), x1: width, y1: height });
   }
 
-  if (dxPx === 0 && dyPx === 0) return null;
-
-  const cx0 = Math.max(0, Math.min(width, x0));
-  const cy0 = Math.max(0, Math.min(height, y0));
-  const cx1 = Math.max(0, Math.min(width, x1));
-  const cy1 = Math.max(0, Math.min(height, y1));
-  if (cx1 <= cx0 || cy1 <= cy0) return null;
-  return { x0: cx0, y0: cy0, x1: cx1, y1: cy1 };
+  return regions;
 }
 
 export function startPanPreview() {
@@ -108,10 +100,18 @@ export function updatePanPreview() {
   // Instant, smooth translation of the last completed frame.
   drawingContext.drawImage(renderContext.panBaseCanvas, dxPx, dyPx);
 
-  const region = exposedRegion(dxPx, dyPx, width, height);
-  if (region && !renderContext.panRenderScheduled) {
-    renderContext.panRenderScheduled = true;
-    requestRender(undefined, undefined, region);
+  const regions = exposedRegions(dxPx, dyPx, width, height);
+  if (regions.length > 0) {
+    // Clear the uncovered strips to the placeholder colour so still-rendering
+    // cells never show stale fractal content (which reads as ghost trails).
+    drawingContext.fillStyle = PREVIEW_PLACEHOLDER_COLOR;
+    for (const r of regions) {
+      drawingContext.fillRect(r.x0, r.y0, r.x1 - r.x0, r.y1 - r.y0);
+    }
+    if (!renderContext.panRenderScheduled) {
+      renderContext.panRenderScheduled = true;
+      requestRender(undefined, undefined, regions);
+    }
   }
 }
 
@@ -125,19 +125,19 @@ export function endPanPreview() {
   const scaleRe = (4 / state.view.zoom) / width;
   const dxPx = (renderContext.panBaseView.centerRe - state.view.centerRe) / scaleRe;
   const dyPx = (renderContext.panBaseView.centerIm - state.view.centerIm) / scaleRe;
-  const region = exposedRegion(dxPx, dyPx, width, height);
-  if (region) {
-    requestRender(undefined, undefined, region);
+  const regions = exposedRegions(dxPx, dyPx, width, height);
+  if (regions.length > 0) {
+    requestRender(undefined, undefined, regions);
   }
 }
 
-export function requestRender(focalX?: number, focalY?: number, region?: PanRegion) {
+export function requestRender(focalX?: number, focalY?: number, regions?: PanRegion[]) {
   state.activeRenderId += 1;
   markDebug('render:request', {
     nextRenderId: state.activeRenderId,
-    region: region ? `${region.x0},${region.y0}-${region.x1},${region.y1}` : null,
+    regionCount: regions ? regions.length : 0,
   });
-  renderFrame(state.activeRenderId, focalX, focalY, region);
+  renderFrame(state.activeRenderId, focalX, focalY, regions);
 }
 
 function tileDistanceSquared(tile: TileTask, x: number, y: number) {
@@ -148,10 +148,11 @@ function tileDistanceSquared(tile: TileTask, x: number, y: number) {
   return dx * dx + dy * dy;
 }
 
-export function renderFrame(renderId: number, focalX?: number, focalY?: number, region?: PanRegion) {
+export function renderFrame(renderId: number, focalX?: number, focalY?: number, regions?: PanRegion[]) {
   // Region renders are incremental pan fills: no start/complete callbacks, no
   // log spam — just compute the newly-exposed strip and composite it.
-  if (!region) {
+  const hasRegions = regions !== undefined && regions.length > 0;
+  if (!hasRegions) {
     renderCallbacks.onRenderStart(renderId);
   }
   terminateWorkers();
@@ -214,25 +215,27 @@ export function renderFrame(renderId: number, focalX?: number, focalY?: number, 
   const scaleIm = viewHeight / height;
   const queue: TileTask[] = [];
 
-  if (region) {
-    // Incremental pan fill: build tiles strictly *inside* the exposed strip so
-    // already-on-screen pixels are never recomputed and never overwritten with
-    // stale content. Subdivide the strip into a grid for worker parallelism,
-    // but clip every tile to the region bounds.
+  if (hasRegions) {
+    // Incremental pan fill: build the normal grid of chunks and keep only those
+    // intersecting a newly-exposed strip, so cells render exactly as in a full
+    // render - never the whole canvas, never a custom shape.
     const columns = Math.max(1, gridColumns);
     const rows = Math.max(1, gridRows);
-    const regionWidth = region.x1 - region.x0;
-    const regionHeight = region.y1 - region.y0;
-    const chunkWidth = regionWidth / columns;
-    const chunkHeight = regionHeight / rows;
+    const chunkWidth = width / columns;
+    const chunkHeight = height / rows;
 
     for (let row = 0; row < rows; row += 1) {
-      const rowStart = region.y0 + Math.floor(row * chunkHeight);
-      const rowEnd = Math.min(region.y1, region.y0 + Math.floor((row + 1) * chunkHeight));
+      const rowStart = Math.floor(row * chunkHeight);
+      const rowEnd = Math.min(height, Math.floor((row + 1) * chunkHeight));
       for (let col = 0; col < columns; col += 1) {
-        const colStart = region.x0 + Math.floor(col * chunkWidth);
-        const colEnd = Math.min(region.x1, region.x0 + Math.floor((col + 1) * chunkWidth));
-        queue.push({ rowStart, rowEnd, colStart, colEnd });
+        const colStart = Math.floor(col * chunkWidth);
+        const colEnd = Math.min(width, Math.floor((col + 1) * chunkWidth));
+        const intersects = regions!.some(
+          (r) => colEnd > r.x0 && colStart < r.x1 && rowEnd > r.y0 && rowStart < r.y1,
+        );
+        if (intersects) {
+          queue.push({ rowStart, rowEnd, colStart, colEnd });
+        }
       }
     }
   } else if (chunkMode === 'none') {
@@ -281,7 +284,7 @@ export function renderFrame(renderId: number, focalX?: number, focalY?: number, 
       return;
     }
 
-    if (!region) {
+    if (!hasRegions) {
       // Keep the last completed frame as the pan base so successive pans can
       // translate it instead of recomputing the whole canvas.
       snapshotPanBase(imageData, renderView, width, height);
@@ -400,15 +403,18 @@ export function renderFrame(renderId: number, focalX?: number, focalY?: number, 
       periodicityShortCircuits += response.periodicityShortCircuits ?? 0;
 
       activeChunkCount -= 1;
-      if (region) {
-        // Incremental pan fill: paint only the tiles just computed onto the
-        // live canvas (dirty-rectangle form) instead of the whole frame. This
-        // preserves the drag-translated base and avoids jumping the view back
-        // to where the render was requested.
+      if (hasRegions) {
+        // Incremental pan fill: paint only the cells just computed onto the
+        // live canvas (dirty-rectangle form). Shift the painted image by the
+        // screen delta between the view this render was requested for and the
+        // live view, so cells land at their current position even though the
+        // canvas kept moving while the worker was busy (no ghost trails).
+        const paintDx = (renderView.centerRe - state.view.centerRe) / scaleRe;
+        const paintDy = (renderView.centerIm - state.view.centerIm) / scaleRe;
         drawingContext.putImageData(
           imageData,
-          0,
-          0,
+          paintDx,
+          paintDy,
           response.colStart,
           response.rowStart,
           response.colEnd - response.colStart,
