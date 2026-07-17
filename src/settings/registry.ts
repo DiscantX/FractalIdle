@@ -4,6 +4,7 @@ export const SECTIONS: SettingSectionDefinition[] = [
   { id: 'canvas', title: 'Canvas' },
   { id: 'fractal', title: 'Fractal' },
   { id: 'rendering', title: 'Rendering' },
+  { id: 'cache', title: 'Tile cache' },
   { id: 'zoom', title: 'Zoom' },
   { id: 'view', title: 'View' },
   { id: 'color-palette', title: 'Color palette' },
@@ -58,6 +59,10 @@ export const coreSettings: SettingDefinition[] = [
   { id: 'gridColumns', kind: 'slider', label: 'Grid columns', section: 'rendering', default: 4, min: 1, max: 8, step: 1, rerender: true },
   { id: 'gridRows', kind: 'slider', label: 'Grid rows', section: 'rendering', default: 4, min: 1, max: 8, step: 1, rerender: true },
   { id: 'workerCount', kind: 'slider', label: 'Worker count', section: 'rendering', default: 4, min: 1, max: 8, step: 1, rerender: true },
+  {
+    id: 'tileCacheSize', kind: 'number', label: 'Max cached tiles', section: 'cache',
+    default: 2000, min: 64, max: 20000, step: 64, rerender: false,
+  },
   {
     id: 'chunkMode', kind: 'select', label: 'Chunk mode', section: 'rendering', default: 'rectangles', rerender: true,
     options: [{ value: 'rectangles', label: 'Rectangles' }, { value: 'none', label: 'No chunking' }],

@@ -4,13 +4,6 @@ export type ViewState = {
   zoom: number;
 };
 
-export type CompletedFrame = {
-  canvas: HTMLCanvasElement;
-  view: ViewState;
-  width: number;
-  height: number;
-};
-
 export type ZoomAnimationState = {
   from: ViewState;
   to: ViewState;
@@ -20,7 +13,6 @@ export type ZoomAnimationState = {
   originX: number;
   originY: number;
   previewCanvas: HTMLCanvasElement;
-  previewFrame: CompletedFrame | null;
 };
 
 export type ChunkMode = 'none' | 'rectangles';
@@ -131,9 +123,6 @@ export type BenchmarkCase = {
   chunkMode: ChunkMode;
   zoomMode: 'instant' | 'smooth';
 };
-
-// Pixel-space rectangle for incremental renders (pan). Inclusive-exclusive.
-export type PanRegion = { x0: number; y0: number; x1: number; y1: number };
 
 export type DebugEvent = {
   index: number;

@@ -1,8 +1,7 @@
-import { RenderState, DragState, CompletedFrame, RenderLogEntry, DebugEvent, FractalType, ViewState } from './types';
+import { RenderState, DragState, RenderLogEntry, DebugEvent, FractalType, ViewState } from './types';
 
 export const STORAGE_KEY = 'mandelbrot-render-logs';
 export const PREVIEW_PLACEHOLDER_COLOR = '#0f172a';
-export const MAX_COMPLETED_FRAME_CACHE = 24;
 
 // Sensible initial framing for each fractal type. Switching types (or hitting
 // the Reset View button) returns to these rather than a hardcoded origin so
@@ -37,17 +36,15 @@ export const dragState: DragState = {
 
 export const renderContext = {
   activeWorkers: [] as Worker[],
-  completedFrames: [] as CompletedFrame[],
   renderLogs: [] as RenderLogEntry[],
   debugEvents: [] as DebugEvent[],
   zoomAnimationGeneration: 0,
   benchmarkTimer: null as number | null,
   renderTimerStart: null as number | null,
   renderTimerFrame: null as number | null,
-  // Snapshot of the last fully-rendered frame, used to translate the image
-  // during a pan so only newly-exposed tiles need computing.
-  panBaseCanvas: null as HTMLCanvasElement | null,
-  panBaseView: null as ViewState | null,
+  // Whether an interactive pan (pointer drag) is in progress. The actual
+  // pixels come from the tile cache via the assembly canvas; these flags just
+  // gate render scheduling during a drag.
   panActive: false,
   panRenderScheduled: false,
 };

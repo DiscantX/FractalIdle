@@ -1,5 +1,5 @@
-import { ViewState, CompletedFrame, ZoomAnimationState, FractalType } from '../types';
-import { state, renderContext, PREVIEW_PLACEHOLDER_COLOR, MAX_COMPLETED_FRAME_CACHE, fractalDefaultViews } from '../state';
+import { ViewState, ZoomAnimationState, FractalType } from '../types';
+import { state, renderContext, PREVIEW_PLACEHOLDER_COLOR, fractalDefaultViews } from '../state';
 import { canvas, drawingContext } from '../ui/dom';
 import { clamp } from '../utils/math';
 import { markDebug } from '../utils/debug';
@@ -23,57 +23,15 @@ export const zoomCallbacks = {
   onZoomChange: (_focalX?: number, _focalY?: number) => {},
 };
 
-export function cacheCompletedFrame(view: ViewState) {
-  const width = getWidth();
-  const height = getHeight();
-
-  const frameCanvas = document.createElement('canvas');
-  frameCanvas.width = width;
-  frameCanvas.height = height;
-  const frameContext = frameCanvas.getContext('2d');
-  if (!frameContext) {
-    return;
-  }
-
-  frameContext.imageSmoothingEnabled = false;
-  frameContext.drawImage(canvas, 0, 0, width, height);
-  renderContext.completedFrames.push({
-    canvas: frameCanvas,
-    view: { ...view },
-    width,
-    height,
-  });
-
-  while (renderContext.completedFrames.length > MAX_COMPLETED_FRAME_CACHE) {
-    renderContext.completedFrames.shift();
-  }
-}
-
-export function getMatchingCompletedFrames() {
-  const width = getWidth();
-  const height = getHeight();
-  return renderContext.completedFrames.filter((frame) => frame.width === width && frame.height === height);
-}
-
-export function findBestPreviewFrame(targetView: ViewState) {
-  const matchingFrames = getMatchingCompletedFrames();
-  if (matchingFrames.length === 0) {
-    return null;
-  }
-
-  const widerFrames = matchingFrames.filter((frame) => frame.view.zoom <= targetView.zoom);
-  if (widerFrames.length > 0) {
-    return widerFrames.reduce((best, frame) => (frame.view.zoom > best.view.zoom ? frame : best));
-  }
-
-  return matchingFrames[matchingFrames.length - 1];
-}
-
+// Projects `sourceCanvas` (rendered for `sourceView`) into the frame for
+// `targetView`, scaling by the zoom ratio and offsetting by the center delta.
+// Used for zoom-out, where the source (higher-zoom) frame shrinks into place
+// within the wider target view.
 export function drawViewProjection(
   targetContext: CanvasRenderingContext2D,
   sourceCanvas: HTMLCanvasElement,
   sourceView: ViewState,
-  targetView: ViewState
+  targetView: ViewState,
 ) {
   const width = getWidth();
   const height = getHeight();
@@ -127,28 +85,6 @@ export function drawFallbackPreview() {
   drawingContext.putImageData(previousFrame, 0, 0);
 }
 
-export function createSmoothPreviewCanvas(from: ViewState, previewFrame: CompletedFrame | null) {
-  const width = getWidth();
-  const height = getHeight();
-
-  const previewCanvas = document.createElement('canvas');
-  previewCanvas.width = width;
-  previewCanvas.height = height;
-  const previewContext = previewCanvas.getContext('2d');
-  if (!previewContext) {
-    return previewCanvas;
-  }
-
-  previewContext.imageSmoothingEnabled = false;
-  if (previewFrame !== null) {
-    drawViewProjection(previewContext, previewFrame.canvas, previewFrame.view, from);
-  } else {
-    previewContext.drawImage(canvas, 0, 0, width, height);
-  }
-
-  return previewCanvas;
-}
-
 export function cancelZoomAnimation() {
   if (state.zoomAnimation?.frameId !== null && state.zoomAnimation?.frameId !== undefined) {
     markDebug('zoom:animation-cancel', {
@@ -185,6 +121,22 @@ export function computeTargetView(factor: number, screenX: number, screenY: numb
   };
 }
 
+// Snapshot the current live canvas at viewport resolution for use as the
+// zoom-animation preview source.
+export function createSmoothPreviewCanvas(): HTMLCanvasElement {
+  const width = getWidth();
+  const height = getHeight();
+  const previewCanvas = document.createElement('canvas');
+  previewCanvas.width = width;
+  previewCanvas.height = height;
+  const previewContext = previewCanvas.getContext('2d');
+  if (previewContext) {
+    previewContext.imageSmoothingEnabled = false;
+    previewContext.drawImage(canvas, 0, 0, width, height);
+  }
+  return previewCanvas;
+}
+
 export function beginSmoothZoom(factor: number, screenX: number, screenY: number) {
   cancelZoomAnimation();
   zoomCallbacks.onZoomStart(); // triggers cancelActiveRender()
@@ -194,8 +146,10 @@ export function beginSmoothZoom(factor: number, screenX: number, screenY: number
   const from = { ...state.view };
   const to = computeTargetView(factor, screenX, screenY, from);
   const isZoomingOut = to.zoom < from.zoom;
-  const previewFrame = isZoomingOut ? findBestPreviewFrame(to) : null;
-  const previewCanvas = createSmoothPreviewCanvas(from, previewFrame);
+  // Snapshot the current on-screen frame (which is composited from the tile
+  // cache) at viewport resolution. Scaling this during the animation gives the
+  // low-res-preview-snaps-to-high-res effect.
+  const previewCanvas = createSmoothPreviewCanvas();
   markDebug('zoom:smooth-begin', {
     factor: Number(factor.toPrecision(8)),
     screenX,
@@ -203,8 +157,6 @@ export function beginSmoothZoom(factor: number, screenX: number, screenY: number
     fromZoom: Number(from.zoom.toPrecision(8)),
     toZoom: Number(to.zoom.toPrecision(8)),
     isZoomingOut,
-    previewFrameZoom: previewFrame === null ? null : Number(previewFrame.view.zoom.toPrecision(8)),
-    completedFrameCount: getMatchingCompletedFrames().length,
   });
 
   const animation: ZoomAnimationState = {
@@ -216,7 +168,6 @@ export function beginSmoothZoom(factor: number, screenX: number, screenY: number
     originX: screenX,
     originY: screenY,
     previewCanvas,
-    previewFrame,
   };
 
   const step = (currentTime: number) => {
@@ -230,7 +181,7 @@ export function beginSmoothZoom(factor: number, screenX: number, screenY: number
     const currentScale = 1 + (scaleRatio - 1) * eased;
 
     state.view = computeTargetView(currentScale, animation.originX, animation.originY, animation.from);
-    
+
     if (progress === 0 || progress === 1 || progress < 0.08 || progress > 0.92) {
       markDebug('zoom:smooth-frame', {
         progress: Number(progress.toFixed(4)),
@@ -238,10 +189,13 @@ export function beginSmoothZoom(factor: number, screenX: number, screenY: number
         currentScale: Number(currentScale.toPrecision(8)),
       });
     }
-    
+
     if ((settingsEngine.getValue('previewMode') as 'current' | 'legacy') === 'legacy') {
-      if (animation.previewFrame !== null && animation.to.zoom < animation.from.zoom) {
-        drawViewProjection(drawingContext, animation.previewFrame.canvas, animation.previewFrame.view, state.view);
+      if (animation.to.zoom < animation.from.zoom) {
+        // Zoom out: project the (higher-zoom) start frame shrinking into place
+        // within the wider view, so the previous image stays visible at the
+        // correct size and position rather than a bare scale-around-origin.
+        drawViewProjection(drawingContext, animation.previewCanvas, animation.from, state.view);
       } else {
         drawZoomPreview(currentScale, animation.originX, animation.originY, animation.previewCanvas);
       }

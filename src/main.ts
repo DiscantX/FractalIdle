@@ -1,7 +1,7 @@
 import { canvas } from './ui/dom';
 import { settingsEngine } from './settings/instance';
 import { requestRender, cancelActiveRender, renderCallbacks } from './services/renderer';
-import { cacheCompletedFrame, zoomCallbacks } from './services/zoom-manager';
+import { zoomCallbacks } from './services/zoom-manager';
 import { loadSavedLogs, appendRenderLog, loggerCallbacks } from './services/logger';
 import { installDebugTools } from './utils/debug';
 import {
@@ -18,8 +18,7 @@ renderCallbacks.onRenderStart = () => {
   updateRenderStatus(true);
 };
 
-renderCallbacks.onRenderComplete = (view) => {
-  cacheCompletedFrame(view);
+renderCallbacks.onRenderComplete = () => {
   appendRenderLog();
   updateStats();
   updateRenderStatus(false);
