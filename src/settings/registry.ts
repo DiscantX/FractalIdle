@@ -101,6 +101,13 @@ export const coreSettings: SettingDefinition[] = [
   {
     id: 'panPreviewFill', kind: 'checkbox', label: 'Pan preview fill', section: 'zoom', default: true, rerender: false,
   },
+  {
+    // Optional optimization: re-warm the (persistent) worker pool at zoom start
+    // so any pool rebuild — e.g. after a fractal-type change — overlaps the zoom
+    // animation instead of blocking the render that lands after it. Safe to turn
+    // off: renderFrame always ensures the pool exists before dispatching.
+    id: 'warmWorkersOnZoom', kind: 'checkbox', label: 'Warm workers on zoom', section: 'zoom', default: true, rerender: false,
+  },
 
   // --- View ---
   { id: 'flipX', kind: 'checkbox', label: 'Flip horizontally', section: 'view', default: false, rerender: true },

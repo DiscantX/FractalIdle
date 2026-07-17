@@ -35,7 +35,6 @@ export const dragState: DragState = {
 };
 
 export const renderContext = {
-  activeWorkers: [] as Worker[],
   renderLogs: [] as RenderLogEntry[],
   debugEvents: [] as DebugEvent[],
   zoomAnimationGeneration: 0,

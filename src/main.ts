@@ -1,6 +1,6 @@
 import { canvas } from './ui/dom';
 import { settingsEngine } from './settings/instance';
-import { requestRender, cancelActiveRender, renderCallbacks } from './services/renderer';
+import { requestRender, cancelActiveRender, warmPool, renderCallbacks } from './services/renderer';
 import { zoomCallbacks } from './services/zoom-manager';
 import { loadSavedLogs, appendRenderLog, loggerCallbacks } from './services/logger';
 import { installDebugTools } from './utils/debug';
@@ -31,6 +31,11 @@ renderCallbacks.onRenderCancel = () => {
 // Link zoom actions to rendering lifecycle
 zoomCallbacks.onZoomStart = () => {
   cancelActiveRender();
+  // Optional: overlap any pool (re)build with the zoom animation. Safe to skip —
+  // renderFrame ensures the pool regardless (see warmWorkersOnZoom setting).
+  if (settingsEngine.getValue('warmWorkersOnZoom') as boolean) {
+    warmPool();
+  }
 };
 
 zoomCallbacks.onZoomChange = (focalX, focalY) => {
@@ -45,6 +50,9 @@ loggerCallbacks.onLogUpdate = (count) => {
 // Bootstrap the application
 function init() {
   installDebugTools();
+  // Create the worker pool as early as possible so its module-load cost happens
+  // during startup, off the critical path of the first render below.
+  warmPool();
   loadSavedLogs();
   mountSettings();
   syncCanvasSize();
