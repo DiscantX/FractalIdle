@@ -81,6 +81,23 @@ export const coreSettings: SettingDefinition[] = [
     id: 'previewMode', kind: 'select', label: 'Preview mode', section: 'zoom', default: 'legacy', rerender: false,
     options: [{ value: 'legacy', label: 'Legacy preview' }, { value: 'current', label: 'Current' }],
   },
+  {
+    id: 'zoomPreviewDepthMode', kind: 'select', label: 'Zoom-out preview depth', section: 'zoom', default: 'limited', rerender: false,
+    options: [
+      { value: 'exact', label: 'Exact level only' },
+      { value: 'limited', label: 'Nearest (limited)' },
+      { value: 'unlimited', label: 'Nearest (unlimited)' },
+    ],
+  },
+  {
+    id: 'zoomPreviewDepthOctaves', kind: 'number', label: 'Max depth (octaves)', section: 'zoom',
+    default: 4, min: 1, max: 32, step: 1, rerender: false,
+    visibleWhen: (s) => s.zoomPreviewDepthMode === 'limited',
+  },
+  {
+    id: 'zoomPreviewMinCoverage', kind: 'slider', label: 'Zoom-out preview min coverage', section: 'zoom',
+    default: 25, min: 0, max: 100, step: 5, rerender: false, format: (v) => `${v}%`,
+  },
 
   // --- View ---
   { id: 'flipX', kind: 'checkbox', label: 'Flip horizontally', section: 'view', default: false, rerender: true },

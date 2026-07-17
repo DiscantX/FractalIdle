@@ -4,7 +4,7 @@ import { canvas, drawingContext } from '../ui/dom';
 import { clamp } from '../utils/math';
 import { markDebug } from '../utils/debug';
 import { settingsEngine } from '../settings/instance';
-import { assembleCachedViewport } from './tile-cache';
+import { assembleBestCachedViewport } from './tile-cache';
 
 function getWidth(): number {
   return settingsEngine.getValue('width') as number;
@@ -154,12 +154,17 @@ export function beginSmoothZoom(factor: number, screenX: number, screenY: number
   // cache) at viewport resolution. Scaling this during the animation gives the
   // low-res-preview-snaps-to-high-res effect.
   const previewCanvas = createSmoothPreviewCanvas();
-  // Zooming out reveals area outside the current frame. If that wider target
-  // level is already fully cached, assemble it now and project it as the base
-  // layer during the animation so the revealed border shows real pixels
-  // instantly instead of popping in from placeholder when the render lands.
+  // Zooming out reveals area outside the current frame. If any cached level
+  // covers that wider target (the exact level, or the nearest neighbor within
+  // the configured depth), assemble it now and project it as the base layer
+  // during the animation so the revealed area shows real pixels instantly
+  // instead of popping in from placeholder when the render lands.
+  const depthMode = settingsEngine.getValue('zoomPreviewDepthMode') as
+    'exact' | 'limited' | 'unlimited';
+  const maxOctaves = settingsEngine.getValue('zoomPreviewDepthOctaves') as number;
+  const minCoverage = (settingsEngine.getValue('zoomPreviewMinCoverage') as number) / 100;
   const targetPreviewCanvas = isZoomingOut
-    ? assembleCachedViewport(to, getWidth(), getHeight())
+    ? assembleBestCachedViewport(to, getWidth(), getHeight(), { depthMode, maxOctaves, minCoverage })
     : null;
   markDebug('zoom:smooth-begin', {
     factor: Number(factor.toPrecision(8)),
@@ -169,6 +174,8 @@ export function beginSmoothZoom(factor: number, screenX: number, screenY: number
     toZoom: Number(to.zoom.toPrecision(8)),
     isZoomingOut,
     targetCached: targetPreviewCanvas !== null,
+    depthMode,
+    minCoverage,
   });
 
   const animation: ZoomAnimationState = {
