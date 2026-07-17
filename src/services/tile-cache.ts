@@ -1,7 +1,7 @@
 import { ViewState, ColorParams } from '../types';
 import { settingsEngine } from '../settings/instance';
 import { markDebug } from '../utils/debug';
-import { renderScalarTileToCanvas, colorizeScalarField } from '../utils/color';
+import { renderScalarTileToCanvas, colorizeScalarFieldInto, buildColorLut, ColorLut } from '../utils/color';
 
 export type TileCanvas = HTMLCanvasElement;
 
@@ -716,27 +716,59 @@ export function assembleBestCachedViewport(
 // interacting: exact tiles appear the instant they compute, instead of waiting
 // for the whole level to finish (the deep-dive-only behavior before).
 
-// Colorize one cached zoom level into a `width×height` canvas at a single hue,
-// scaled/placed for `view`. With allowGaps, tiles not yet cached are left
-// transparent (for the crisp overlay); without it, missing tiles take the
-// palette's zero color (only used for a base layer that is already near-complete).
-// Returns null when the level has zero cached coverage.
-function assembleUniformLayer(
+// --- Reusable scratch for the uniform-color path ---------------------------
+// The uniform-color viewport is rebuilt every animation/dive/zoom frame. Doing
+// that with fresh `document.createElement('canvas')` + `new ImageData` +
+// `new Float32Array` per layer per frame allocated ~tens of MB of *external*
+// (off-heap) memory each frame; V8 under-schedules GC for external buffers, so
+// memory ramped to GB and the tab froze. We instead hold persistent, grow-only
+// scratch and reuse it every frame. Two layer slots (base + overlay) keep their
+// own scratch so their differing sizes don't force a realloc each frame — each
+// slot's geometry is stable frame-to-frame during a dive.
+type LayerScratch = {
+  data: Float32Array; // grow-only scalar buffer, length >= nativeW*nativeH
+  native: HTMLCanvasElement; // grow-only offscreen at native tile resolution
+  img: ImageData | null; // exact nativeW×nativeH (realloc only when that changes)
+  imgW: number;
+  imgH: number;
+};
+
+function newLayerScratch(): LayerScratch {
+  return { data: new Float32Array(0), native: document.createElement('canvas'), img: null, imgW: 0, imgH: 0 };
+}
+
+const baseScratch = newLayerScratch();
+const overlayScratch = newLayerScratch();
+// The composited width×height output, reused across frames and returned to the
+// caller (which blits it to the live canvas before the next frame overwrites it).
+let uniformOut: HTMLCanvasElement | null = null;
+
+// Draw one cached zoom level, colorized at a single hue (via the shared `lut`),
+// scaled/placed for `view`, directly into `octx`. With allowGaps, tiles not yet
+// cached are punched transparent so a base layer below shows through. Returns
+// true if anything was drawn. Uses `scratch` for all intermediates — no
+// per-frame allocation unless a buffer must grow.
+function drawUniformLayerInto(
+  octx: CanvasRenderingContext2D,
   view: ViewState,
   width: number,
   height: number,
   candidateZoom: number,
-  params: ColorParams,
+  lut: ColorLut,
+  maxIterations: number,
   allowGaps: boolean,
-): HTMLCanvasElement | null {
+  scratch: LayerScratch,
+): boolean {
   const computeSig = computeComputeSignature();
   const { scaleRe, scaleIm } = scaleForView(view, width, height);
   const r = candidateTileRange(view, width, height, candidateZoom);
-  const maxIterations = settingsEngine.getValue('maxIterations') as number;
   const nativeW = r.numTilesX * r.tw;
   const nativeH = r.numTilesY * r.th;
+  const needed = nativeW * nativeH;
 
-  const data = new Float32Array(nativeW * nativeH);
+  if (scratch.data.length < needed) scratch.data = new Float32Array(needed);
+  const data = scratch.data;
+
   const missing: Array<{ i: number; j: number }> = [];
   let covered = 0;
   for (let j = 0; j < r.numTilesY; j += 1) {
@@ -755,15 +787,23 @@ function assembleUniformLayer(
       }
     }
   }
-  if (covered === 0) return null;
+  if (covered === 0) return false;
 
-  const native = document.createElement('canvas');
-  native.width = nativeW;
-  native.height = nativeH;
+  const native = scratch.native;
+  if (native.width !== nativeW) native.width = nativeW;
+  if (native.height !== nativeH) native.height = nativeH;
   const nctx = native.getContext('2d');
-  if (!nctx) return null;
-  const img = colorizeScalarField(data, nativeW, nativeH, maxIterations, params);
-  nctx.putImageData(img, 0, 0);
+  if (!nctx) return false;
+
+  // ImageData dimensions are immutable, so reuse only on an exact size match
+  // (nativeW/H are viewport-driven and stable frame-to-frame, so this is rare).
+  if (!scratch.img || scratch.imgW !== nativeW || scratch.imgH !== nativeH) {
+    scratch.img = new ImageData(nativeW, nativeH);
+    scratch.imgW = nativeW;
+    scratch.imgH = nativeH;
+  }
+  colorizeScalarFieldInto(data, nativeW, nativeH, maxIterations, lut, scratch.img);
+  nctx.putImageData(scratch.img, 0, 0);
   if (allowGaps) {
     // Punch out uncomputed tiles so the base layer below shows through.
     for (const m of missing) nctx.clearRect(m.i * r.tw, m.j * r.th, r.tw, r.th);
@@ -774,14 +814,10 @@ function assembleUniformLayer(
   const drawW = (r.numTilesX * r.tileWorldW) / scaleRe;
   const drawH = (r.numTilesY * r.tileWorldH) / scaleIm;
 
-  const canvas = document.createElement('canvas');
-  canvas.width = width;
-  canvas.height = height;
-  const ctx = canvas.getContext('2d');
-  if (!ctx) return null;
-  ctx.imageSmoothingEnabled = true;
-  ctx.drawImage(native, Math.round(screenX), Math.round(screenY), Math.round(drawW), Math.round(drawH));
-  return canvas;
+  // Draw the native-resolution layer straight into the shared output at the
+  // scaled position — no per-layer width×height canvas needed.
+  octx.drawImage(native, Math.round(screenX), Math.round(screenY), Math.round(drawW), Math.round(drawH));
+  return true;
 }
 
 /**
@@ -790,6 +826,9 @@ function assembleUniformLayer(
  * fully-cached level, never gappy) with the exact level's available tiles
  * composited crisply on top. Returns null when nothing is cached yet, so callers
  * fall back / keep the last frame.
+ *
+ * Reuses persistent scratch (see LayerScratch above) — the returned canvas is a
+ * shared, reused buffer: blit it before the next call overwrites it.
  */
 export function assembleUniformColorViewport(
   view: ViewState,
@@ -798,6 +837,12 @@ export function assembleUniformColorViewport(
   params: ColorParams,
 ): HTMLCanvasElement | null {
   const exactZoom = view.zoom;
+  const maxIterations = settingsEngine.getValue('maxIterations') as number;
+  // Build the LUT once and share it across both layers — the per-pixel mapping is
+  // a pure function of the frame-constant params, so a per-layer rebuild (4096
+  // HSL round-trips each) would be wasted work.
+  const lut = buildColorLut(maxIterations, params);
+
   // Soft base: nearest COMPLETE level (guarantees full coverage → no gaps/black).
   const baseZoom = pickBestCachedZoom(view, width, height, {
     depthMode: 'unlimited',
@@ -805,18 +850,19 @@ export function assembleUniformColorViewport(
     minCoverage: 0.999,
   });
 
-  const out = document.createElement('canvas');
-  out.width = width;
-  out.height = height;
+  if (!uniformOut) uniformOut = document.createElement('canvas');
+  const out = uniformOut;
+  if (out.width !== width) out.width = width;
+  if (out.height !== height) out.height = height;
   const octx = out.getContext('2d');
   if (!octx) return null;
   octx.imageSmoothingEnabled = true;
+  // Reused buffer: clear last frame's pixels before compositing this one.
+  octx.clearRect(0, 0, width, height);
 
   let painted = false;
   if (baseZoom !== null) {
-    const base = assembleUniformLayer(view, width, height, baseZoom, params, false);
-    if (base) {
-      octx.drawImage(base, 0, 0);
+    if (drawUniformLayerInto(octx, view, width, height, baseZoom, lut, maxIterations, false, baseScratch)) {
       painted = true;
     }
   }
@@ -837,9 +883,7 @@ export function assembleUniformColorViewport(
     minZoom: exactZoom,
   });
   if (overlayZoom !== null && (baseZoom === null || zoomKey(overlayZoom) !== zoomKey(baseZoom))) {
-    const overlay = assembleUniformLayer(view, width, height, overlayZoom, params, painted);
-    if (overlay) {
-      octx.drawImage(overlay, 0, 0);
+    if (drawUniformLayerInto(octx, view, width, height, overlayZoom, lut, maxIterations, painted, overlayScratch)) {
       painted = true;
     }
   }

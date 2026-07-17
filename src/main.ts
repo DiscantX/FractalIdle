@@ -2,7 +2,7 @@ import { canvas } from './ui/dom';
 import { settingsEngine } from './settings/instance';
 import { requestRender, cancelActiveRender, warmPool, renderCallbacks, promoteActiveRenderToPresent } from './services/renderer';
 import { zoomCallbacks } from './services/zoom-manager';
-import { loadSavedLogs, appendRenderLog, loggerCallbacks } from './services/logger';
+import { loadSavedLogs, appendRenderLog, loggerCallbacks, enableLogging } from './services/logger';
 import { installDebugTools } from './utils/debug';
 import {
   wireControls,
@@ -78,6 +78,10 @@ loggerCallbacks.onLogUpdate = (count) => {
 // Bootstrap the application
 function init() {
   installDebugTools();
+  // Render logging is off by default (it re-serializes the whole log to
+  // localStorage on every completed render — a real cost during a deep dive).
+  // Turn it on from the console when needed: `enableRenderLogging()` then reload.
+  (window as unknown as { enableRenderLogging: () => void }).enableRenderLogging = enableLogging;
   // Create the worker pool as early as possible so its module-load cost happens
   // during startup, off the critical path of the first render below.
   warmPool();

@@ -2,11 +2,24 @@ import { RenderLogEntry, ChunkMode } from '../types';
 import { state, renderContext, STORAGE_KEY } from '../state';
 import { settingsEngine } from '../settings/instance';
 
+// Logging is OFF by default. While on, every completed render appends an entry
+// and (re)serializes the whole log to localStorage — fine for occasional
+// benchmark runs, but during a continuous deep dive it grows without bound and
+// does O(n) stringify+write work every render. Leave it disabled unless you
+// actually want the log; enable via enableLogging().
+let loggingEnabled = false;
+const LOG_CAP = 200;
+
+export function enableLogging(): void {
+  loggingEnabled = true;
+}
+
 export const loggerCallbacks = {
   onLogUpdate: (_count: number) => {},
 };
 
 export function loadSavedLogs() {
+  if (!loggingEnabled) return;
   const saved = window.localStorage.getItem(STORAGE_KEY);
   if (!saved) {
     return;
@@ -26,6 +39,7 @@ export function saveLogs() {
 }
 
 export function appendRenderLog(scenario?: string) {
+  if (!loggingEnabled) return;
   renderContext.renderLogs.push({
     timestamp: new Date().toISOString(),
     scenario,
@@ -41,6 +55,10 @@ export function appendRenderLog(scenario?: string) {
     lastRenderMs: state.lastRenderMs,
     lastSteps: state.lastSteps,
   });
+  // Bound the array so a long dive can't grow it without limit.
+  if (renderContext.renderLogs.length > LOG_CAP) {
+    renderContext.renderLogs.splice(0, renderContext.renderLogs.length - LOG_CAP);
+  }
   saveLogs();
   loggerCallbacks.onLogUpdate(renderContext.renderLogs.length);
 }

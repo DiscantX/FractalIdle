@@ -3,7 +3,7 @@ import { settingsEngine } from '../settings/instance';
 import { state, renderContext, PREVIEW_PLACEHOLDER_COLOR } from '../state';
 import { drawingContext } from '../ui/dom';
 import { markDebug } from '../utils/debug';
-import { colorizeScalarFieldInto } from '../utils/color';
+import { colorizeScalarFieldInto, buildColorLut } from '../utils/color';
 import {
   assembleFromCache,
   assembleBestCachedViewport,
@@ -371,7 +371,8 @@ export function paintBaseScalarFrame(): boolean {
   ) {
     recolorScratch = new ImageData(base.width, base.height);
   }
-  colorizeScalarFieldInto(base.data, base.width, base.height, base.maxIterations, params, recolorScratch);
+  const lut = buildColorLut(base.maxIterations, params);
+  colorizeScalarFieldInto(base.data, base.width, base.height, base.maxIterations, lut, recolorScratch);
   drawingContext.putImageData(recolorScratch, Math.round(base.sx0), Math.round(base.sy0));
   return true;
 }

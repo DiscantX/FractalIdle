@@ -232,7 +232,7 @@ export function scalarToRgb(
 
 const LUT_SIZE = 4096;
 
-type ColorLut = {
+export type ColorLut = {
   table: Uint8Array; // LUT_SIZE * 3, adjusted RGB per normalized position
   mode: 'gradient' | 'world-map' | 'black-white';
   minIt: number;
@@ -347,16 +347,18 @@ export function renderScalarTileToCanvas(
 
 // Colorize a full-frame scalar field into a caller-provided ImageData. Reusing a
 // scratch ImageData across repaints avoids a multi-MB allocation every frame,
-// which matters for smooth slider drags and animation. `img` must be w*h.
+// which matters for smooth slider drags and animation. `img` must be w*h. The
+// LUT is built by the caller and shared across every layer of a single frame
+// (see assembleUniformColorViewport) — the per-pixel mapping is a pure function
+// of the frame-constant params, so rebuilding it per layer would be wasted work.
 export function colorizeScalarFieldInto(
   scalar: Float32Array,
   w: number,
   h: number,
   maxIterations: number,
-  params: ColorParams,
+  lut: ColorLut,
   img: ImageData,
 ): void {
-  const lut = buildColorLut(maxIterations, params);
   fillRgbaFromLut(scalar, w * h, maxIterations, lut, img.data);
 }
 
@@ -370,6 +372,6 @@ export function colorizeScalarField(
   params: ColorParams,
 ): ImageData {
   const img = new ImageData(w, h);
-  colorizeScalarFieldInto(scalar, w, h, maxIterations, params, img);
+  colorizeScalarFieldInto(scalar, w, h, maxIterations, buildColorLut(maxIterations, params), img);
   return img;
 }
