@@ -487,6 +487,13 @@ export function collectLayerMisses(view: ViewState, width: number, height: numbe
   };
 }
 
+// Upper bound on how many cached zoom levels pickBestCachedZoom will
+// coverage-test per call. Candidates are sorted nearest-first, so the nearest
+// qualifying level is found within the first few; farther levels are useless as
+// scaled fallbacks. Caps the per-frame cost at O(K × tiles) no matter how many
+// levels the cache holds (see the note in pickBestCachedZoom).
+const MAX_COVERAGE_CANDIDATES = 8;
+
 export type ZoomPreviewDepthMode = 'exact' | 'limited' | 'unlimited';
 
 export type ZoomPreviewOptions = {
@@ -524,6 +531,24 @@ type CandidateTileRange = {
   tw: number;
   th: number;
 };
+
+// A viewport spans only a handful of tiles per axis. At extreme zoom, double
+// precision breaks down and the tile-range division can yield non-finite or
+// absurdly large counts; treating such a range as valid would allocate a giant
+// buffer and loop unboundedly (a hard freeze). This bound is orders of magnitude
+// above any real viewport, so it only ever rejects degenerate geometry.
+const MAX_SANE_TILES_PER_AXIS = 4096;
+
+function saneTileRange(r: { numTilesX: number; numTilesY: number }): boolean {
+  return (
+    Number.isFinite(r.numTilesX) &&
+    Number.isFinite(r.numTilesY) &&
+    r.numTilesX > 0 &&
+    r.numTilesY > 0 &&
+    r.numTilesX <= MAX_SANE_TILES_PER_AXIS &&
+    r.numTilesY <= MAX_SANE_TILES_PER_AXIS
+  );
+}
 
 // Tile grid (in `candidateZoom` tile coordinates) spanning the target viewport's
 // world bounds. Used both to measure a candidate level's coverage and to draw it.
@@ -585,6 +610,7 @@ function candidateCoverage(
   signature: string,
 ): { covered: number; total: number } {
   const r = candidateTileRange(view, width, height, candidateZoom);
+  if (!saneTileRange(r)) return { covered: 0, total: 0 };
   let covered = 0;
   let total = 0;
   for (let j = 0; j < r.numTilesY; j += 1) {
@@ -622,13 +648,22 @@ function pickBestCachedZoom(
   ).filter((z) => notExcluded(z) && deepEnough(z));
 
   // Check candidates nearest-first (by octave distance) and return the first one
-  // that meets the coverage threshold. The nearest qualifying level is always
-  // the best, so there is no need to measure coverage for farther levels — this
-  // avoids an O(levels × tiles) scan on every zoom-out wheel tick.
+  // that meets the coverage threshold. Crucially we only coverage-test the
+  // nearest MAX_COVERAGE_CANDIDATES levels: when a near level qualifies this
+  // costs a couple of scans, but when NONE qualify (e.g. the base pick during a
+  // deep dive, once complete shallow levels have been LRU-evicted) the old
+  // unbounded loop scanned EVERY cached level every frame — an O(levels × tiles)
+  // pass that also allocates a key string per tile. As a dive accumulates
+  // hundreds of levels that per-frame allocation rate climbed until GC thrashed
+  // and the tab froze. A level many octaves from the target is a useless
+  // (blurred/aliased) fallback anyway, so capping the scan is visually harmless
+  // and makes the cost independent of how many levels are cached.
   candidates.sort(
     (a, b) => Math.abs(Math.log2(a / targetZoom)) - Math.abs(Math.log2(b / targetZoom)),
   );
-  for (const z of candidates) {
+  const scanLimit = Math.min(candidates.length, MAX_COVERAGE_CANDIDATES);
+  for (let k = 0; k < scanLimit; k += 1) {
+    const z = candidates[k];
     const { covered, total } = candidateCoverage(view, width, height, z, signature);
     if (total === 0 || covered / total < opts.minCoverage) continue;
     return z;
@@ -744,10 +779,9 @@ const overlayScratch = newLayerScratch();
 let uniformOut: HTMLCanvasElement | null = null;
 
 // Draw one cached zoom level, colorized at a single hue (via the shared `lut`),
-// scaled/placed for `view`, directly into `octx`. With allowGaps, tiles not yet
-// cached are punched transparent so a base layer below shows through. Returns
-// true if anything was drawn. Uses `scratch` for all intermediates — no
-// per-frame allocation unless a buffer must grow.
+// scaled/placed for `view`, directly into `octx`. Returns true if anything
+// was drawn. Uses `scratch` for all intermediates — no per-frame allocation
+// unless a buffer must grow.
 function drawUniformLayerInto(
   octx: CanvasRenderingContext2D,
   view: ViewState,
@@ -756,12 +790,12 @@ function drawUniformLayerInto(
   candidateZoom: number,
   lut: ColorLut,
   maxIterations: number,
-  allowGaps: boolean,
   scratch: LayerScratch,
 ): boolean {
   const computeSig = computeComputeSignature();
   const { scaleRe, scaleIm } = scaleForView(view, width, height);
   const r = candidateTileRange(view, width, height, candidateZoom);
+  if (!saneTileRange(r)) return false;
   const nativeW = r.numTilesX * r.tw;
   const nativeH = r.numTilesY * r.th;
   const needed = nativeW * nativeH;
@@ -804,10 +838,10 @@ function drawUniformLayerInto(
   }
   colorizeScalarFieldInto(data, nativeW, nativeH, maxIterations, lut, scratch.img);
   nctx.putImageData(scratch.img, 0, 0);
-  if (allowGaps) {
-    // Punch out uncomputed tiles so the base layer below shows through.
-    for (const m of missing) nctx.clearRect(m.i * r.tw, m.j * r.th, r.tw, r.th);
-  }
+  // Punch out uncomputed tiles so the base layer below shows through. This is
+  // unconditional here because the native layer's backing store is reused and
+  // may contain stale pixel data from a prior frame.
+  for (const m of missing) nctx.clearRect(m.i * r.tw, m.j * r.th, r.tw, r.th);
 
   const screenX = (r.colStart * r.tileWorldW - (view.centerRe - (width / 2) * scaleRe)) / scaleRe;
   const screenY = (r.rowStart * r.tileWorldH - (view.centerIm - (height / 2) * scaleIm)) / scaleIm;
@@ -862,7 +896,7 @@ export function assembleUniformColorViewport(
 
   let painted = false;
   if (baseZoom !== null) {
-    if (drawUniformLayerInto(octx, view, width, height, baseZoom, lut, maxIterations, false, baseScratch)) {
+    if (drawUniformLayerInto(octx, view, width, height, baseZoom, lut, maxIterations, baseScratch)) {
       painted = true;
     }
   }
@@ -883,7 +917,7 @@ export function assembleUniformColorViewport(
     minZoom: exactZoom,
   });
   if (overlayZoom !== null && (baseZoom === null || zoomKey(overlayZoom) !== zoomKey(baseZoom))) {
-    if (drawUniformLayerInto(octx, view, width, height, overlayZoom, lut, maxIterations, painted, overlayScratch)) {
+    if (drawUniformLayerInto(octx, view, width, height, overlayZoom, lut, maxIterations, overlayScratch)) {
       painted = true;
     }
   }
