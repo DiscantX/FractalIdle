@@ -21,10 +21,15 @@ import {
 import { isAnimationPlaying } from './color-animation';
 import { computeTargetView } from './zoom-manager';
 
+// Default no-op lifecycle hooks. Other modules (UI, perf overlay) overwrite
+// these to be notified of render start / completion / cancellation. Defined with
+// method shorthand (rather than anonymous arrows) so each hook carries its own
+// name and stays identifiable in the Jank profiler instead of showing as
+// `(anonymous)`.
 export const renderCallbacks = {
-  onRenderStart: (_renderId: number) => {},
-  onRenderComplete: (_view: ViewState, _lastRenderMs: number, _totalSteps: number) => {},
-  onRenderCancel: () => {},
+  onRenderStart(_renderId: number) {},
+  onRenderComplete(_view: ViewState, _lastRenderMs: number, _totalSteps: number) {},
+  onRenderCancel() {},
 };
 
 const fractalWorkerMap: Record<FractalType, string> = {
@@ -148,8 +153,14 @@ export function getChunkBreakdown(): Record<string, number> {
   return Object.fromEntries(tileBreakdown.entries());
 }
 
+// Per-worker cumulative compute time (ms), in pool order — feeds the per-worker
+// breakdown in the performance overlay.
+function readWorkerComputeMs(worker: Worker): number {
+  return workerComputeMsMap.get(worker) ?? 0;
+}
+
 export function getWorkerComputeBreakdown(): number[] {
-  return poolWorkers.map((w) => workerComputeMsMap.get(w) ?? 0);
+  return poolWorkers.map(readWorkerComputeMs);
 }
 
 // Cumulative main-thread paint time (ms): time spent issuing canvas compositing
@@ -248,8 +259,12 @@ function ensurePool(fractalType: FractalType, count: number) {
   let created = 0;
   while (poolWorkers.length < count) {
     const worker = new Worker(new URL(fractalWorkerMap[fractalType], import.meta.url), { type: 'module' });
-    worker.onmessage = (event: MessageEvent<WorkerResponse>) => handleWorkerMessage(worker, event);
-    worker.onerror = () => handleWorkerError(worker);
+    // Named (not anonymous) so each pooled worker's reply/error handler stays
+    // identifiable in the Jank profiler — these run on every tile result.
+    const onPoolWorkerMessage = (event: MessageEvent<WorkerResponse>) => handleWorkerMessage(worker, event);
+    const onPoolWorkerError = () => handleWorkerError(worker);
+    worker.onmessage = onPoolWorkerMessage;
+    worker.onerror = onPoolWorkerError;
     poolWorkers.push(worker);
     idleWorkers.add(worker);
     created += 1;
@@ -404,13 +419,18 @@ export function requestRender(
  */
 let recolorScheduled = false;
 
+// Run the recolor on the next animation frame, after clearing the scheduled
+// flag so a subsequent cheapRecolorRepaint() during this frame re-arms. Named
+// (not an inline arrow) to stay identifiable in the Jank profiler.
+function runRecolorOnNextFrame(): void {
+  recolorScheduled = false;
+  performRecolor();
+}
+
 export function cheapRecolorRepaint(): void {
   if (recolorScheduled) return;
   recolorScheduled = true;
-  requestAnimationFrame(() => {
-    recolorScheduled = false;
-    performRecolor();
-  });
+  requestAnimationFrame(runRecolorOnNextFrame);
 }
 
 // A scratch ImageData reused across repaints so a color-slider drag or animation
@@ -715,13 +735,20 @@ export function renderFrame(
   // every worker before any look-ahead tile — look-ahead only runs on spare
   // capacity. (Look-ahead is appended below, AFTER the primary, so it can never
   // starve the screen view.)
-  const primaryMisses = assembled.misses.slice().sort((a, b) => {
+  // Sort the primary layer's cache-miss tiles by squared distance from the focal
+  // point so the interesting region resolves first and the screen appears ASAP.
+  // Named (not an inline arrow) to stay identifiable in the Jank profiler.
+  const compareMissesByFocalDistance = (
+    a: { col: number; row: number; i: number; j: number },
+    b: { col: number; row: number; i: number; j: number },
+  ): number => {
     const da = (a.i * primaryLayer.tileW + primaryLayer.tileW / 2 - focalLocalX) ** 2 +
       (a.j * primaryLayer.tileH + primaryLayer.tileH / 2 - focalLocalY) ** 2;
     const db = (b.i * primaryLayer.tileW + primaryLayer.tileW / 2 - focalLocalX) ** 2 +
       (b.j * primaryLayer.tileH + primaryLayer.tileH / 2 - focalLocalY) ** 2;
     return da - db;
-  });
+  };
+  const primaryMisses = assembled.misses.slice().sort(compareMissesByFocalDistance);
   for (const m of primaryMisses) queue.push({ layer: primaryLayer, ...m });
 
   // Speculative prerender layers (look-ahead = deeper, look-behind = shallower)

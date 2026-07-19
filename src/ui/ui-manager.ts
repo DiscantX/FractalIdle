@@ -151,10 +151,7 @@ async function pasteCoordinates() {
   navReInput.value = formatCoord(nums[0]);
   navImInput.value = formatCoord(nums[1]);
   navZoomInput.value = formatCoord(nums[2]);
-  [navReInput, navImInput, navZoomInput].forEach((input) => {
-    input.classList.remove('nav-invalid');
-    markNavFieldDirty(input);
-  });
+  [navReInput, navImInput, navZoomInput].forEach(stageNavigatorField);
   // Hand focus to Jump so the user can commit with a single Enter/Space press
   // instead of having to click the button (focus was on Paste until now).
   navJumpButton.focus();
@@ -163,9 +160,12 @@ async function pasteCoordinates() {
 function flashButton(button: HTMLButtonElement, label: string) {
   const original = button.textContent;
   button.textContent = label;
-  window.setTimeout(() => {
+  // Named (not an inline arrow) so the label-restore timer stays identifiable
+  // in the Jank profiler.
+  function restoreButtonLabel(): void {
     button.textContent = original;
-  }, 1100);
+  }
+  window.setTimeout(restoreButtonLabel, 1100);
 }
 
 // Toggle a shadow on the navigator once it pins to the top of the scrolling
@@ -175,10 +175,14 @@ function initNavigatorSticky() {
   if (typeof IntersectionObserver === 'undefined') {
     return;
   }
+  // Toggle the stuck shadow when the zero-height sentinel leaves the panel's
+  // top edge. Named (not an inline arrow) to stay identifiable in the Jank
+  // profiler.
+  function onNavigatorSentinelIntersection([entry]: IntersectionObserverEntry[]): void {
+    navCard.classList.toggle('is-stuck', !entry.isIntersecting);
+  }
   const observer = new IntersectionObserver(
-    ([entry]) => {
-      navCard.classList.toggle('is-stuck', !entry.isIntersecting);
-    },
+    onNavigatorSentinelIntersection,
     { root: navCard.parentElement, threshold: 0 },
   );
   observer.observe(navSentinel);
@@ -384,43 +388,80 @@ export function updateLogCountText(count: number) {
   logCountOutput.textContent = String(count);
 }
 
+// --- Control-wiring helpers ------------------------------------------------
+// Named handlers (rather than inline arrows) so every control's event stays
+// identifiable in the Jank profiler instead of appearing as `(anonymous)`.
+
+function handleRenderButtonClick(): void {
+  requestRender();
+}
+
+function handleExportLogsButtonClick(): void {
+  exportLogs();
+}
+
+function handleBenchmarkButtonClick(): void {
+  runBenchmarkSweep();
+}
+
+// Right-click zooms out (native context menu suppressed). Mirrors the right-
+// button branch of handleClick; ignored if the press was a drag (pan).
+function handleCanvasContextMenu(event: MouseEvent): void {
+  event.preventDefault();
+  if (dragState.moved) return;
+  const zoomMode = settingsEngine.getValue('zoomMode') as 'instant' | 'smooth';
+  const factor = getClickZoomFactor('out');
+  if (zoomMode === 'smooth') {
+    beginSmoothZoom(factor, event.offsetX, event.offsetY);
+  } else {
+    applyZoom(factor, event.offsetX, event.offsetY);
+  }
+}
+
+// Wire the per-field listeners for one navigator coordinate input: mark it dirty
+// on edit (so live view updates don't clobber a pending edit) and commit the
+// jump on Enter.
+function bindNavigatorField(input: HTMLInputElement): void {
+  function handleFieldEdit(): void {
+    markNavFieldDirty(input);
+  }
+  input.addEventListener('input', handleFieldEdit);
+  input.addEventListener('keydown', handleNavigatorFieldKeydown);
+}
+
+function handleNavigatorFieldKeydown(event: KeyboardEvent): void {
+  if (event.key === 'Enter') {
+    event.preventDefault();
+    performJump();
+  }
+}
+
+// Stage a pasted coordinate into its field: clear any invalid styling and mark
+// the field as a pending (user) edit so live view updates don't overwrite it
+// before the user commits with Jump.
+function stageNavigatorField(input: HTMLInputElement): void {
+  input.classList.remove('nav-invalid');
+  markNavFieldDirty(input);
+}
+
 export function wireControls() {
-  renderButton.addEventListener('click', () => requestRender());
-  exportLogsButton.addEventListener('click', () => exportLogs());
-  benchmarkButton.addEventListener('click', () => runBenchmarkSweep());
+  renderButton.addEventListener('click', handleRenderButtonClick);
+  exportLogsButton.addEventListener('click', handleExportLogsButtonClick);
+  benchmarkButton.addEventListener('click', handleBenchmarkButtonClick);
 
   canvas.addEventListener('mousedown', handlePointerDown);
   window.addEventListener('mousemove', handlePointerMove);
   window.addEventListener('mouseup', handlePointerUp);
   canvas.addEventListener('wheel', handleWheel, { passive: false });
   canvas.addEventListener('click', handleClick);
-  // Disable default context menu and handle right-click to zoom out
-  canvas.addEventListener('contextmenu', (e) => {
-    e.preventDefault();
-    // Handle right-click zoom out
-    if (dragState.moved) return;
-    const zoomMode = settingsEngine.getValue('zoomMode') as 'instant' | 'smooth';
-    const factor = getClickZoomFactor('out');
-    if (zoomMode === 'smooth') {
-      beginSmoothZoom(factor, e.offsetX, e.offsetY);
-    } else {
-      applyZoom(factor, e.offsetX, e.offsetY);
-    }
-  });
+  // Disable default context menu and handle right-click to zoom out.
+  canvas.addEventListener('contextmenu', handleCanvasContextMenu);
 
-  navJumpButton.addEventListener('click', () => performJump());
-  navOriginButton.addEventListener('click', () => resetView());
-  navCopyButton.addEventListener('click', () => copyCoordinates());
-  navPasteButton.addEventListener('click', () => pasteCoordinates());
-  [navReInput, navImInput, navZoomInput].forEach((input) => {
-    input.addEventListener('input', () => markNavFieldDirty(input));
-    input.addEventListener('keydown', (event) => {
-      if (event.key === 'Enter') {
-        event.preventDefault();
-        performJump();
-      }
-    });
-  });
+  navJumpButton.addEventListener('click', performJump);
+  navOriginButton.addEventListener('click', resetView);
+  navCopyButton.addEventListener('click', copyCoordinates);
+  navPasteButton.addEventListener('click', pasteCoordinates);
+  [navReInput, navImInput, navZoomInput].forEach(bindNavigatorField);
 
   initNavigatorSticky();
 
