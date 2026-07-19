@@ -2,6 +2,13 @@
   font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   color: #e5e7eb;
   background: #0f172a;
+  /* HUD insets: distance from the viewport/panel edge to a HUD element so it
+     clears the canvas border (panel padding + canvas border) with a safe gap.
+     Shared by the performance overlay (top-right) and the render-status badge
+     (top-left) so both sit the same distance inside the canvas border. */
+  --canvas-border-gap: calc(1rem + 1px);
+  --hud-margin: 0.75rem;
+  --hud-inset: calc(var(--canvas-border-gap) + var(--hud-margin));
 }
 
 * {
@@ -320,7 +327,7 @@ label output {
 
 .canvas-overlay {
   position: absolute;
-  inset: 1.15rem auto auto 1rem;
+  inset: var(--hud-inset) auto auto var(--hud-inset);
   z-index: 2;
   pointer-events: none;
 }
@@ -397,8 +404,8 @@ canvas {
 
 #performanceOverlay {
   position: absolute;
-  top: 10px;
-  right: 10px;
+  top: var(--hud-inset);
+  right: var(--hud-inset);
   background: rgba(0, 0, 0, 0.8);
   color: #fff;
   font-size: 12px;
@@ -408,9 +415,14 @@ canvas {
   pointer-events: none;
   display: none;
   white-space: pre;
+  /* Width of a sparkline; must match DEFAULT_WIDTH in src/ui/sparkline.ts. The
+     left gutter on each .perf-line reserves this plus a 6px gap so every
+     sparkline lines up in the same far-left column. */
+  --spark-w: 64px;
   /* Floor the width so the box doesn't constantly resize. The Jank/culprit block
-     is the longest (and most variable) line; 45ch covers it with headroom. */
-  min-width: 45ch;
+     is the longest (and most variable) line; 45ch covers it, plus the sparkline
+     gutter on every line. */
+  min-width: calc(45ch + var(--spark-w) + 6px);
 }
 
 #jankTooltip {
@@ -429,8 +441,19 @@ canvas {
 
 /* Overlay text segments (built from child spans so each can be colored
    independently). Titles are bold + group-colored; units/qualifiers are muted. */
-.perf-line { line-height: 1.35; }
-.perf-sub { padding-left: 2ch; }
+/* Every line is a positioning context with a left gutter that reserves room for
+   the sparkline. The sparkline itself is absolutely positioned at the line's far
+   left, so top-level and indented (sub) lines all share the same sparkline
+   column — only the text is indented for sub-lines. */
+.perf-line { line-height: 1.35; position: relative; padding-left: calc(var(--spark-w) + 6px); }
+.perf-sub { padding-left: calc(var(--spark-w) + 6px + 2ch); }
+/* Sparkline pinned to the far-left column of its line (see .perf-line gutter). */
+#performanceOverlay svg.perf-spark {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+}
 .perf-title { font-weight: 700; }
 .perf-unit { color: #8b949e; }
 .grp-throughput { color: #56d4dd; }

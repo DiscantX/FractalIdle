@@ -9,6 +9,7 @@ import {
   getPaintMs,
 } from '../services/renderer';
 import { cacheSize, colorCacheCount } from '../services/tile-cache';
+import { Sparkline } from './sparkline';
 
 // Performance overlay element (module-level)
 let perfOverlay: HTMLDivElement | null = null;
@@ -21,7 +22,11 @@ function createPerformanceOverlay(): void {
   // value, and the metrics loop idles on `style.display === 'none'`, so the
   // initial state must be inline rather than merely stylesheet-derived.
   perfOverlay.style.display = 'none';
-  document.body.appendChild(perfOverlay);
+  // Append into the canvas panel (not body) so the overlay and the
+  // render-status badge share one containing block and therefore the same
+  // `var(--hud-inset)` margin. The panel is position:relative, so the overlay's
+  // absolute top/right resolve against the panel just like the badge's inset.
+  (document.querySelector<HTMLElement>('.canvas-panel') ?? document.body).appendChild(perfOverlay);
 
   // Custom tooltip for the Jank culprit list. The overlay has pointer-events:
   // none (so it never blocks the canvas), which also suppresses the native
@@ -261,6 +266,25 @@ function buildJankTooltip(): void {
   const med = percentile(totals, 50);
   const spread = Math.max(med * BAND_FRACTION, BAND_FLOOR);
   root.replaceChildren();
+  // Column widths for alignment: "@" at a fixed column (fn right-aligned to it), the count's
+  // ones digit (count right-aligned), and the "(" of the time block (a fixed-
+  // width numeric block). The block sits after a fixed-width left column, so the
+  // "(" lines up regardless of how long the path is.
+  let maxFnLen = 0;
+  let maxSrcLen = 0;
+  let maxCountW = 1;
+  let maxTimeW = 1;
+  for (const [key, data] of sorted) {
+    const atIdx = key.indexOf(' @ ');
+    const fn = atIdx >= 0 ? key.slice(0, atIdx) : key;
+    const srcPath = atIdx >= 0 ? key.slice(atIdx + 3) : '';
+    maxFnLen = Math.max(maxFnLen, fn.length);
+    maxSrcLen = Math.max(maxSrcLen, srcPath.length);
+    maxCountW = Math.max(maxCountW, String(data.count).length);
+    maxTimeW = Math.max(maxTimeW, data.totalMs.toFixed(1).length);
+  }
+  const SRC_CAP = 36; // cap the path column so one long path can't blow out layout
+  const srcCap = Math.min(maxSrcLen, SRC_CAP);
   for (const [key, data] of sorted) {
     const line = document.createElement('div');
     line.className = 'perf-line';
@@ -268,20 +292,22 @@ function buildJankTooltip(): void {
     // their own uniform color (distinct from the totalMs severity gradient).
     const atIdx = key.indexOf(' @ ');
     const fn = atIdx >= 0 ? key.slice(0, atIdx) : key;
-    const srcPath = atIdx >= 0 ? key.slice(atIdx + 3) : '';
+    let srcPath = atIdx >= 0 ? key.slice(atIdx + 3) : '';
+    if (srcPath.length > srcCap) srcPath = '…' + srcPath.slice(-(srcCap - 1));
     // Lower totalMs is better → greener. Normalize against the offender set so
     // the worst (largest totalMs) reads red and the median reads yellow.
     let tNorm = spread > 0 ? (data.totalMs - med) / spread : 0;
     tNorm = Math.min(1, Math.max(-1, tNorm));
     let tColor = (tNorm + 1) / 2; // 0.5 at the median (yellow)
     tColor = 1 - tColor; // flip: lower totalMs = greener
-    line.appendChild(textSpan(fn, 'jank-fn'));
+    line.appendChild(textSpan(fn.padStart(maxFnLen), 'jank-fn'));
     line.appendChild(textSpan(' @ '));
     line.appendChild(textSpan(srcPath, 'jank-path'));
-    line.appendChild(textSpan(` ×${data.count} (`));
+    line.appendChild(textSpan(' '.repeat(srcCap - srcPath.length)));
+    line.appendChild(textSpan(` ×${String(data.count).padStart(maxCountW)} (`));
     const ms = document.createElement('span');
     ms.style.color = gradient(tColor);
-    ms.textContent = `${data.totalMs.toFixed(1)}ms total`;
+    ms.textContent = `${data.totalMs.toFixed(1).padStart(maxTimeW)}ms total`;
     line.appendChild(ms);
     line.appendChild(textSpan(')'));
     root.appendChild(line);
@@ -529,6 +555,44 @@ function valueColor(key: string, value: number): string | null {
   return gradient(goodness);
 }
 
+// --- Sparklines -------------------------------------------------------------
+// A persistent Sparkline per stat key. The registry survives the overlay's
+// per-window replaceChildren() rebuild (we re-append each line's existing SVG
+// node every window), and each Sparkline owns its own 1Hz ring buffer, so the
+// history is fully independent of statTrackers (which only covers gradient
+// stats). This keeps the Sparkline module decoupled from the perf stats.
+const sparklines = new Map<string, Sparkline>();
+// Group colors mirror the .grp-* CSS rules; used as the stroke for neutral
+// stats that have no value gradient.
+const GROUP_COLOR: Record<string, string> = {
+  'grp-throughput': '#56d4dd',
+  'grp-mainthread': '#f0883e',
+  'grp-compute': '#bc8cff',
+  'grp-memory': '#79c0ff',
+  'grp-jank': '#ff7b9c',
+};
+
+function getSparkline(key: string): Sparkline {
+  let s = sparklines.get(key);
+  if (!s) {
+    s = new Sparkline();
+    sparklines.set(key, s);
+  }
+  return s;
+}
+
+// Record the latest sample for a stat and return its sparkline element. Each
+// vertex is colored by its own value's gradient (low→red, high→green), falling
+// back to the group color for neutral stats or before enough history has
+// accumulated. Prepend the returned node as the first child of the line.
+function sparklineFor(key: string, value: number, group: string): SVGSVGElement {
+  const sl = getSparkline(key);
+  sl.setColorize((v) => valueColor(key, v) ?? GROUP_COLOR[group] ?? '#8b949e');
+  sl.setColor(GROUP_COLOR[group] ?? '#8b949e');
+  sl.push(value);
+  return sl.element;
+}
+
 function statLine(sub: boolean, children: Node[]): HTMLDivElement {
   const div = document.createElement('div');
   div.className = sub ? 'perf-line perf-sub' : 'perf-line';
@@ -564,6 +628,24 @@ function textSpan(text: string, cls?: string): HTMLSpanElement {
   if (cls) s.className = cls;
   s.textContent = text;
   return s;
+}
+
+// Fixed label-column widths (chars) per group, so each group's values land in a
+// shared column. Each width is the max of (label length + sub-indent) across
+// that group's labeled value lines. Relies on the overlay's `white-space: pre`.
+const THROUGHPUT_LABEL_W = 12; // FPS, Chunks/s, ahead/behind-N, All chunks/s
+const MAINTHREAD_LABEL_W = 11; // CPU (main)
+const COMPUTE_LABEL_W = 10; // Compute, Paint, Worker N
+const MEMORY_LABEL_W = 9; // Cache, Est cache, Mem
+const JANK_LABEL_W = 5; // Jank, Max
+
+// Pad a label to a fixed width so its trailing ": value" aligns across lines in
+// the same group. `subIndent` is the line's sub-indent in chars (2 for
+// .perf-sub); we subtract it so sub-line values reach the same absolute column
+// as top-level ones.
+function padLabel(label: string, width: number, subIndent = 0): string {
+  const pad = Math.max(0, width - subIndent - label.length);
+  return label + ' '.repeat(pad);
 }
 
 // Order the per-level chunk breakdown (ahead-N / behind-N) to mirror the
@@ -697,12 +779,14 @@ function startMetricsLoop(): void {
 
       // --- Throughput ---
       overlay.appendChild(statLine(false, [
-        titleSpan('grp-throughput', 'FPS'),
+        sparklineFor('fps', fps, 'grp-throughput'),
+        titleSpan('grp-compute', padLabel('FPS', THROUGHPUT_LABEL_W)),
         textSpan(': '),
         valSpan('fps', fps.toFixed(1)),
       ]));
       overlay.appendChild(statLine(false, [
-        titleSpan('grp-throughput', 'Chunks/s'),
+        sparklineFor('chunks', chunksPerSec, 'grp-throughput'),
+        titleSpan('grp-throughput', padLabel('Chunks/s', THROUGHPUT_LABEL_W)),
         textSpan(': '),
         valSpan('chunks', chunksPerSec.toFixed(1)),
       ]));
@@ -712,20 +796,24 @@ function startMetricsLoop(): void {
       for (const e of bdEntries) {
         recordStat(`level-${e.k}`, e.delta, 'high');
         overlay.appendChild(statLine(true, [
-          textSpan(`${e.k}: `),
+          sparklineFor(`level-${e.k}`, e.delta, 'grp-throughput'),
+          titleSpan('grp-throughput', padLabel(e.k, THROUGHPUT_LABEL_W, 2)),
+          textSpan(': '),
           valSpan(`level-${e.k}`, e.delta.toFixed(1)),
           unitSpan('/s'),
         ]));
       }
       overlay.appendChild(statLine(false, [
-        titleSpan('grp-throughput', 'All chunks/s'),
+        sparklineFor('allChunks', totalChunksPerSec, 'grp-throughput'),
+        titleSpan('grp-throughput', padLabel('All chunks/s', THROUGHPUT_LABEL_W)),
         textSpan(': '),
         valSpan('allChunks', totalChunksPerSec.toFixed(1)),
       ]));
 
       // --- Main-thread load ---
       overlay.appendChild(statLine(false, [
-        titleSpan('grp-mainthread', 'CPU (main)'),
+        sparklineFor('cpu', cpuPercent, 'grp-mainthread'),
+        titleSpan('grp-mainthread', padLabel('CPU (main)', MAINTHREAD_LABEL_W)),
         textSpan(': '),
         valSpan('cpu', cpuPercent.toFixed(1)),
         unitSpan('%'),
@@ -733,14 +821,16 @@ function startMetricsLoop(): void {
 
       // --- Compute (Paint + Worker are indented subsections) ---
       overlay.appendChild(statLine(false, [
-        titleSpan('grp-compute', 'Compute'),
+        sparklineFor('compute', computeMsPerSec, 'grp-compute'),
+        titleSpan('grp-compute', padLabel('Compute', COMPUTE_LABEL_W)),
         textSpan(': '),
         textSpan(`${computeMsPerSec.toFixed(0)}`),
         unitSpan(' ms/s'),
         textSpan(` (${(computeMsPerSec / 10).toFixed(0)}% of time)`),
       ]));
       overlay.appendChild(statLine(true, [
-        titleSpan('grp-compute', 'Paint'),
+        sparklineFor('paint', paintMsPerSec, 'grp-compute'),
+        titleSpan('grp-compute', padLabel('Paint', COMPUTE_LABEL_W, 2)),
         textSpan(': '),
         valSpan('paint', paintMsPerSec.toFixed(0)),
         unitSpan(' ms/s'),
@@ -748,7 +838,8 @@ function startMetricsLoop(): void {
       ]));
       for (const w of workerEntries) {
         overlay.appendChild(statLine(true, [
-          titleSpan('grp-compute', `Worker ${w.i}`),
+          sparklineFor(`worker${w.i}`, w.perSec, 'grp-compute'),
+          titleSpan('grp-compute', padLabel(`Worker ${w.i}`, COMPUTE_LABEL_W, 2)),
           textSpan(': '),
           valSpan(`worker${w.i}`, w.perSec.toFixed(0)),
           unitSpan(' ms/s'),
@@ -757,13 +848,15 @@ function startMetricsLoop(): void {
 
       // --- Memory ---
       overlay.appendChild(statLine(false, [
-        titleSpan('grp-memory', 'Cache'),
+        sparklineFor('cache', cacheTiles, 'grp-memory'),
+        titleSpan('grp-memory', padLabel('Cache', MEMORY_LABEL_W)),
         textSpan(': '),
         textSpan(`${cacheTiles}`),
         unitSpan(` tiles (color: ${colorTiles})`),
       ]));
       overlay.appendChild(statLine(false, [
-        titleSpan('grp-memory', 'Est cache'),
+        sparklineFor('estcache', estimateCacheMb(), 'grp-memory'),
+        titleSpan('grp-memory', padLabel('Est cache', MEMORY_LABEL_W)),
         textSpan(': '),
         textSpan(`${estimateCacheMb().toFixed(1)}`),
         unitSpan(' MB'),
@@ -773,14 +866,15 @@ function startMetricsLoop(): void {
         // (M) = Main: performance.memory fallback, main-thread JS heap only.
         const tag = memSource === 'agent' ? 'S' : 'M';
         overlay.appendChild(statLine(false, [
-          titleSpan('grp-memory', 'Mem'),
+          sparklineFor('mem', memMb, 'grp-memory'),
+          titleSpan('grp-memory', padLabel('Mem', MEMORY_LABEL_W)),
           textSpan(': '),
           textSpan(`${memMb}`),
           unitSpan(` MB (${tag})`),
         ]));
       } else {
         overlay.appendChild(statLine(false, [
-          titleSpan('grp-memory', 'Mem'),
+          titleSpan('grp-memory', padLabel('Mem', MEMORY_LABEL_W)),
           textSpan(': n/a'),
         ]));
       }
@@ -788,29 +882,37 @@ function startMetricsLoop(): void {
       // --- Jank (main-thread blockage) ---
       if (jankSupported !== true) {
         overlay.appendChild(statLine(false, [
-          titleSpan('grp-jank', 'Jank'),
+          titleSpan('grp-jank', padLabel('Jank', JANK_LABEL_W)),
           textSpan(': n/a'),
         ]));
       } else {
         overlay.appendChild(statLine(false, [
-          titleSpan('grp-jank', 'Jank'),
+          sparklineFor('jankCount', jankAccumCount, 'grp-jank'),
+          titleSpan('grp-jank', padLabel('Jank', JANK_LABEL_W)),
           textSpan(': '),
           valSpan('jankCount', String(jankAccumCount)),
-          textSpan(' (max '),
+        ]));
+        // "max" is its own line (one sparkline per line), indented to align with
+        // the Jank group's other sub-items.
+        overlay.appendChild(statLine(true, [
+          sparklineFor('jankMax', jankAccumMaxMs, 'grp-jank'),
+          titleSpan('grp-jank', padLabel('Max', JANK_LABEL_W, 2)),
+          textSpan(': '),
           valSpan('jankMax', jankAccumMaxMs.toFixed(0)),
-          unitSpan('ms)'),
+          unitSpan('ms'),
         ]));
         if (jankCulpritToShow) {
-          // Split "<fn> @ <path>" so the function stays on the culprit line and the
-          // path drops to its own line, indented under "Main culprit".
+          // Split "<fn> @ <path>" into lines: the "Main culprit" label line keeps
+          // the optional "(stale)" tag, the function drops to its own line, and
+          // the path drops to its own line after that — all indented under Jank.
           const atIdx = jankCulpritToShow.indexOf(' @ ');
           const fn = atIdx >= 0 ? jankCulpritToShow.slice(0, atIdx) : jankCulpritToShow;
           const srcPath = atIdx >= 0 ? jankCulpritToShow.slice(atIdx + 3) : '';
           overlay.appendChild(statLine(true, [
             titleSpan('grp-jank', 'Main culprit'),
-            textSpan(`: ${fn}`, 'jank-fn'),
-            textSpan(jankCulpritStale ? ' (stale)' : ''),
+            textSpan(jankCulpritStale ? ': (stale)' : ':'),
           ]));
+          overlay.appendChild(statLine(true, [textSpan(fn, 'jank-fn')]));
           if (srcPath) {
             overlay.appendChild(statLine(true, [textSpan(srcPath, 'jank-path')]));
           }
