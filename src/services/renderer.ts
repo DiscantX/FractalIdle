@@ -74,6 +74,10 @@ type RenderLayer = {
   range: { colStart: number; rowStart: number };
   assembly?: HTMLCanvasElement;
   actx?: CanvasRenderingContext2D | null;
+  // Set on speculative prerender layers only: which prerender direction/level
+  // this layer is, used to break down chunk throughput in the perf overlay.
+  levelDir?: 'ahead' | 'behind';
+  levelIndex?: number;
 };
 
 // The render currently accepting tile results. Each render installs a fresh job
@@ -101,9 +105,82 @@ let activeRender: ActiveRender | null = null;
 // id to the worker protocol (a worker holds exactly one task at a time, and is
 // only re-dispatched after it replies, so this mapping is always 1:1 and current).
 const workerTask = new Map<Worker, QueuedTile>();
+// When each tile was dispatched to its worker. Paired with the reply time below
+// to measure actual worker compute duration — a real, measured proxy for the
+// app's CPU usage (the heavy fractal math runs in the workers, not the main
+// thread). No worker-protocol change needed: start/end are both recorded on the
+// main thread around the postMessage/reply round-trip.
+const workerDispatchTime = new Map<Worker, number>();
+// Cumulative worker compute time (ms) per worker, indexed by the same order as
+// `poolWorkers`. Lets the performance overlay show a per-worker breakdown.
+const workerComputeMsMap = new Map<Worker, number>();
+// Cumulative worker compute time (ms) since startup. Consumers (the performance
+// overlay) diff successive reads to get compute time per second. Never reset —
+// a monotonic counter is simpler to read from another module.
+let totalWorkerComputeMs = 0;
+// Cumulative count of primary-layer (on-screen) chunks that have been fully
+// computed AND painted to the canvas. This is the "chunks rendered per second"
+// throughput metric for the performance overlay. Monotonic; consumers diff
+// successive reads to get a per-second rate.
+let totalPrimaryTiles = 0;
+// Cumulative count of ALL completed chunks (primary + look-ahead + look-behind),
+// i.e. every tile a worker has fully computed regardless of whether it painted.
+let totalAllTiles = 0;
+// Cumulative chunk counts broken down by category key:
+//   'screen'        – primary (on-screen) layer
+//   'ahead-N'       – look-ahead (deeper) prerender level N
+//   'behind-N'      – look-behind (shallower) prerender level N
+const tileBreakdown = new Map<string, number>();
+
+export function getWorkerComputeMs(): number {
+  return totalWorkerComputeMs;
+}
+
+export function getPrimaryTileCount(): number {
+  return totalPrimaryTiles;
+}
+
+export function getTotalTileCount(): number {
+  return totalAllTiles;
+}
+
+export function getChunkBreakdown(): Record<string, number> {
+  return Object.fromEntries(tileBreakdown.entries());
+}
+
+export function getWorkerComputeBreakdown(): number[] {
+  return poolWorkers.map((w) => workerComputeMsMap.get(w) ?? 0);
+}
+
+// Cumulative main-thread paint time (ms): time spent issuing canvas compositing
+// commands (drawImage / putImageData) on the main thread. Monotonic; the perf
+// overlay diffs successive reads for a per-second rate. NOTE: this measures the
+// time to *issue* the paint commands (JS call + command submission), not full
+// GPU rasterization — but it captures the main-thread cost that competes with
+// our own JS (worker dispatch, event handling), which is what we care about.
+let totalPaintMs = 0;
+
+export function getPaintMs(): number {
+  return totalPaintMs;
+}
+
+export function addPaintTime(ms: number): void {
+  if (ms > 0) totalPaintMs += ms;
+}
+
+function accountComputeTime(worker: Worker): void {
+  const dispatchedAt = workerDispatchTime.get(worker);
+  workerDispatchTime.delete(worker);
+  if (dispatchedAt !== undefined) {
+    const elapsed = performance.now() - dispatchedAt;
+    totalWorkerComputeMs += elapsed;
+    workerComputeMsMap.set(worker, (workerComputeMsMap.get(worker) ?? 0) + elapsed);
+  }
+}
 
 function handleWorkerMessage(worker: Worker, event: MessageEvent<WorkerResponse>) {
   idleWorkers.add(worker);
+  accountComputeTime(worker);
   const ar = activeRender;
   const resp = event.data;
   const q = workerTask.get(worker);
@@ -122,6 +199,7 @@ function handleWorkerMessage(worker: Worker, event: MessageEvent<WorkerResponse>
 
 function handleWorkerError(worker: Worker) {
   idleWorkers.add(worker);
+  accountComputeTime(worker);
   const ar = activeRender;
   const q = workerTask.get(worker);
   workerTask.delete(worker);
@@ -147,6 +225,7 @@ function pump() {
     const q = ar.queue.shift() as QueuedTile;
     ar.outstanding += 1;
     workerTask.set(worker, q);
+    workerDispatchTime.set(worker, performance.now());
     worker.postMessage(ar.buildTask(q));
   }
   if (ar.queue.length === 0 && ar.outstanding === 0) {
@@ -373,7 +452,9 @@ export function paintBaseScalarFrame(): boolean {
   }
   const lut = buildColorLut(base.maxIterations, params);
   colorizeScalarFieldInto(base.data, base.width, base.height, base.maxIterations, lut, recolorScratch);
+  const paintStart = performance.now();
   drawingContext.putImageData(recolorScratch, Math.round(base.sx0), Math.round(base.sy0));
+  addPaintTime(performance.now() - paintStart);
   return true;
 }
 
@@ -393,7 +474,9 @@ export function paintUniformColorFrame(view: ViewState = state.view): boolean {
   const canvas = assembleUniformColorViewport(view, width, height, params);
   if (!canvas) return false;
   drawingContext.imageSmoothingEnabled = true;
+  const paintStart = performance.now();
   drawingContext.drawImage(canvas, 0, 0);
+  addPaintTime(performance.now() - paintStart);
   return true;
 }
 
@@ -424,7 +507,9 @@ function presentAssembly(assembled: ReturnType<typeof assembleFromCache>, view: 
     (assembled.assemblyCenterIm - view.centerIm) / assembled.scaleIm +
     (assembled.height - assembled.assemblyHeight) / 2;
   drawingContext.imageSmoothingEnabled = false;
+  const paintStart = performance.now();
   drawingContext.drawImage(assembled.assembly, Math.round(sx0), Math.round(sy0));
+  addPaintTime(performance.now() - paintStart);
 }
 
 // True when `b` differs from `a` enough to warrant a fresh render — more than a
@@ -667,7 +752,13 @@ export function renderFrame(
     // Order per the chosen policy — see orderSpeculative.
     const policy = settingsEngine.getValue('zoomLookPriority') as SpeculativePolicy;
     const ordered = orderSpeculative(ahead, behind, renderContext.lastZoomDir, policy);
+    // Map each target view back to its prerender direction/level so we can tag
+    // the resulting layer for the per-level chunk breakdown.
+    const levelTags = new Map<ViewState, { dir: 'ahead' | 'behind'; level: number }>();
+    for (let n = 0; n < ahead.length; n += 1) levelTags.set(ahead[n], { dir: 'ahead', level: n });
+    for (let n = 0; n < behind.length; n += 1) levelTags.set(behind[n], { dir: 'behind', level: n });
     for (const v of ordered) {
+      const tag = levelTags.get(v);
       const lm = collectLayerMisses(v, width, height);
       const layer: RenderLayer = {
         primary: false,
@@ -681,6 +772,8 @@ export function renderFrame(
         tileW: lm.tileW,
         tileH: lm.tileH,
         range: { colStart: lm.range.colStart, rowStart: lm.range.rowStart },
+        levelDir: tag?.dir,
+        levelIndex: tag?.level,
       };
       for (const m of lm.misses) queue.push({ layer, ...m });
     }
@@ -784,6 +877,15 @@ export function renderFrame(
     const layer = q.layer;
     const col = layer.range.colStart + q.i;
     const row = layer.range.rowStart + q.j;
+
+    // Classify this completed chunk for the performance breakdown:
+    //   'screen'      – primary (on-screen) layer
+    //   'ahead-N'     – look-ahead (deeper) prerender level N
+    //   'behind-N'    – look-behind (shallower) prerender level N
+    const category = layer.primary ? 'screen' : `${layer.levelDir ?? 'ahead'}-${layer.levelIndex ?? 0}`;
+    totalAllTiles += 1;
+    tileBreakdown.set(category, (tileBreakdown.get(category) ?? 0) + 1);
+    if (layer.primary) totalPrimaryTiles += 1;
 
     // Store the scalar field in Tier 1 (world-keyed by its own zoom) for instant
     // reuse when the live zoom reaches this level. Then colorize it (Stage 2) into

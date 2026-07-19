@@ -5,7 +5,7 @@ import { clamp } from '../utils/math';
 import { markDebug } from '../utils/debug';
 import { settingsEngine } from '../settings/instance';
 import { assembleBestCachedViewport } from './tile-cache';
-import { paintUniformColorFrame } from './renderer';
+import { paintUniformColorFrame, addPaintTime } from './renderer';
 import { isAnimationPlaying } from './color-animation';
 
 function getWidth(): number {
@@ -71,7 +71,9 @@ export function drawViewProjection(
     targetContext.fillStyle = PREVIEW_PLACEHOLDER_COLOR;
     targetContext.fillRect(0, 0, width, height);
   }
+  const paintStart = performance.now();
   targetContext.drawImage(sourceCanvas, offsetX, offsetY, width * scale, height * scale);
+  addPaintTime(performance.now() - paintStart);
   targetContext.restore();
 }
 
@@ -85,7 +87,9 @@ export function drawZoomPreview(scale: number, originX: number, originY: number,
   drawingContext.translate(originX, originY);
   drawingContext.scale(scale, scale);
   drawingContext.translate(-originX, -originY);
+  const paintStart = performance.now();
   drawingContext.drawImage(previewCanvas, 0, 0, width, height);
+  addPaintTime(performance.now() - paintStart);
   drawingContext.restore();
 }
 
@@ -102,7 +106,9 @@ export function drawFallbackPreview() {
   }
 
   const previousFrame = drawingContext.getImageData(0, 0, width, height);
+  const paintStart = performance.now();
   drawingContext.putImageData(previousFrame, 0, 0);
+  addPaintTime(performance.now() - paintStart);
 }
 
 export function cancelZoomAnimation() {

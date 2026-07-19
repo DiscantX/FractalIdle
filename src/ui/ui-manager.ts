@@ -36,6 +36,7 @@ import {
   navCopyButton,
   navPasteButton,
 } from './dom';
+import { showPerformanceOverlay } from './perf-overlay';
 
 function getWidth(): number {
   return settingsEngine.getValue('width') as number;
@@ -393,6 +394,19 @@ export function wireControls() {
   window.addEventListener('mouseup', handlePointerUp);
   canvas.addEventListener('wheel', handleWheel, { passive: false });
   canvas.addEventListener('click', handleClick);
+  // Disable default context menu and handle right-click to zoom out
+  canvas.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    // Handle right-click zoom out
+    if (dragState.moved) return;
+    const zoomMode = settingsEngine.getValue('zoomMode') as 'instant' | 'smooth';
+    const factor = getClickZoomFactor('out');
+    if (zoomMode === 'smooth') {
+      beginSmoothZoom(factor, e.offsetX, e.offsetY);
+    } else {
+      applyZoom(factor, e.offsetX, e.offsetY);
+    }
+  });
 
   navJumpButton.addEventListener('click', () => performJump());
   navOriginButton.addEventListener('click', () => resetView());
@@ -409,4 +423,7 @@ export function wireControls() {
   });
 
   initNavigatorSticky();
+
+  // Performance overlay is on by default.
+  showPerformanceOverlay();
 }

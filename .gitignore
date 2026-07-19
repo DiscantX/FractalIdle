@@ -5,4 +5,5 @@ node_modules/
 .vscode
 tsconfig.tsbuildinfo
 tsconfig.node.tsbuildinfo
-
+vite.config.js
+vite.config.ts
