@@ -1,12 +1,16 @@
 import { ViewState, ZoomAnimationState, FractalType } from '../types';
 import { state, renderContext, PREVIEW_PLACEHOLDER_COLOR, fractalDefaultViews } from '../state';
 import { canvas, drawingContext } from '../ui/dom';
-import { clamp } from '../utils/math';
 import { markDebug } from '../utils/debug';
 import { settingsEngine } from '../settings/instance';
 import { assembleBestCachedViewport } from './tile-cache';
 import { paintUniformColorFrame, addPaintTime } from './renderer';
 import { isAnimationPlaying } from './color-animation';
+import { runAnimation, type AnimationHandle } from './animation-driver';
+// Runtime-only cyclic import: fly-to imports cancelZoomAnimation/zoomCallbacks
+// from here, and we import cancelFlyTo from there. Neither is called during
+// module evaluation (only inside handlers/RAF), so the cycle is safe.
+import { cancelFlyTo } from './fly-to';
 
 function getWidth(): number {
   return settingsEngine.getValue('width') as number;
@@ -111,12 +115,17 @@ export function drawFallbackPreview() {
   addPaintTime(performance.now() - paintStart);
 }
 
+// The smooth-zoom animation's RAF handle (from runAnimation). Held at module
+// scope so cancelZoomAnimation can stop the loop regardless of which call started
+// it. Distinct from state.zoomAnimation, which other modules read as a "is a zoom
+// animation in progress" flag.
+let activeZoomHandle: AnimationHandle | null = null;
+
 export function cancelZoomAnimation() {
-  if (state.zoomAnimation?.frameId !== null && state.zoomAnimation?.frameId !== undefined) {
-    markDebug('zoom:animation-cancel', {
-      frameId: state.zoomAnimation.frameId,
-    });
-    cancelAnimationFrame(state.zoomAnimation.frameId);
+  if (activeZoomHandle) {
+    markDebug('zoom:animation-cancel', {});
+    activeZoomHandle.cancel();
+    activeZoomHandle = null;
   }
   state.zoomAnimation = null;
   renderContext.zoomAnimationGeneration += 1;
@@ -165,6 +174,7 @@ export function createSmoothPreviewCanvas(): HTMLCanvasElement {
 
 export function beginSmoothZoom(factor: number, screenX: number, screenY: number) {
   cancelZoomAnimation();
+  cancelFlyTo(); // a fly-to and a smooth zoom must never both drive state.view
   zoomCallbacks.onZoomStart(); // triggers cancelActiveRender()
   
   const animationToken = renderContext.zoomAnimationGeneration + 1;
@@ -216,9 +226,7 @@ export function beginSmoothZoom(factor: number, screenX: number, screenY: number
   const animation: ZoomAnimationState = {
     from,
     to,
-    startTime: performance.now(),
     duration: 220,
-    frameId: null,
     originX: screenX,
     originY: screenY,
     previewCanvas,
@@ -249,13 +257,17 @@ export function beginSmoothZoom(factor: number, screenX: number, screenY: number
     }
   };
 
-  const step = (currentTime: number) => {
+  // Per-frame body (was the RAF `step`; the loop itself is now runAnimation).
+  // `eased` is the easeOutCubic value supplied by the driver — same curve as the
+  // inline `1 - (1-progress)^3` this replaced, so the feel is unchanged.
+  const applyFrame = (progress: number, eased: number) => {
+    // Parity guard with the old generation check: bail if this animation was
+    // superseded. (runAnimation already stops a cancelled loop, so this is
+    // belt-and-braces.)
     if (renderContext.zoomAnimationGeneration !== animationToken || state.zoomAnimation !== animation) {
       return;
     }
 
-    const progress = clamp((currentTime - animation.startTime) / animation.duration, 0, 1);
-    const eased = 1 - Math.pow(1 - progress, 3);
     const scaleRatio = animation.to.zoom / animation.from.zoom;
     const currentScale = 1 + (scaleRatio - 1) * eased;
 
@@ -266,20 +278,8 @@ export function beginSmoothZoom(factor: number, screenX: number, screenY: number
     // in ONE hue pass so the zooming frame stays uniformly colored (instead of
     // compositing the RGB preview snapshot + cached tiles, which would each carry
     // a different — and stale — hue). Falls back to the normal preview path if the
-    // cache doesn't yet cover this view.
+    // cache doesn't yet cover this view. Completion is handled by `finish` below.
     if (isAnimationPlaying() && paintUniformColorFrame(state.view)) {
-      if (progress < 1) {
-        animation.frameId = requestAnimationFrame(step);
-      } else {
-        if (renderContext.zoomAnimationGeneration === animationToken) {
-          state.view = animation.to;
-          state.zoomAnimation = null;
-          markDebug('zoom:smooth-end', {
-            targetZoom: Number(animation.to.zoom.toPrecision(8)),
-          });
-          zoomCallbacks.onZoomEnd(animation.originX, animation.originY); // presents the destination render
-        }
-      }
       return;
     }
 
@@ -320,22 +320,22 @@ export function beginSmoothZoom(factor: number, screenX: number, screenY: number
       drawFallbackPreview();
       drawCrispOverlay();
     }
-
-    if (progress < 1) {
-      animation.frameId = requestAnimationFrame(step);
-    } else {
-      if (renderContext.zoomAnimationGeneration === animationToken) {
-        state.view = animation.to;
-        state.zoomAnimation = null;
-        markDebug('zoom:smooth-end', {
-          targetZoom: Number(animation.to.zoom.toPrecision(8)),
-        });
-        zoomCallbacks.onZoomEnd(animation.originX, animation.originY); // presents the destination render
-      } // <- Closes the inner 'if'
-    } // <- Closes the outer 'else'
   };
 
-  animation.frameId = requestAnimationFrame(step);
+  const finish = () => {
+    if (renderContext.zoomAnimationGeneration !== animationToken) {
+      return;
+    }
+    state.view = animation.to;
+    state.zoomAnimation = null;
+    activeZoomHandle = null;
+    markDebug('zoom:smooth-end', {
+      targetZoom: Number(animation.to.zoom.toPrecision(8)),
+    });
+    zoomCallbacks.onZoomEnd(animation.originX, animation.originY); // presents the destination render
+  };
+
+  activeZoomHandle = runAnimation(animation.duration, applyFrame, finish);
   state.zoomAnimation = animation;
 
   // Kick off (or re-aim) a background render of the destination view now, while
@@ -350,6 +350,7 @@ export function beginSmoothZoom(factor: number, screenX: number, screenY: number
 
 
 export function applyZoom(factor: number, screenX: number, screenY: number) {
+  cancelFlyTo(); // an instant zoom cancels any in-flight flight
   renderContext.lastZoomDir = factor < 1 ? 'out' : 'in';
   const targetView = computeTargetView(factor, screenX, screenY, state.view);
   markDebug('zoom:instant', {
@@ -368,6 +369,7 @@ export function applyZoom(factor: number, screenX: number, screenY: number) {
 // the destination, then requests a fresh render.
 export function jumpTo(centerRe: number, centerIm: number, zoom: number) {
   cancelZoomAnimation();
+  cancelFlyTo();
   renderContext.lastZoomDir = 'none';
   state.view.centerRe = centerRe;
   state.view.centerIm = centerIm;
@@ -383,6 +385,7 @@ export function jumpTo(centerRe: number, centerIm: number, zoom: number) {
 
 export function resetView() {
   cancelZoomAnimation();
+  cancelFlyTo();
   renderContext.lastZoomDir = 'none';
   const fractalType = settingsEngine.getValue('fractalType') as FractalType;
   const defaultView = fractalDefaultViews[fractalType];

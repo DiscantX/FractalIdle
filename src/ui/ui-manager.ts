@@ -12,6 +12,7 @@ import {
 } from '../services/zoom-manager';
 import { exportLogs } from '../services/logger';
 import { markDebug } from '../utils/debug';
+import { truncateNumericString } from '../utils/format';
 import {
   canvas,
   settingsContainer,
@@ -31,12 +32,23 @@ import {
   navReInput,
   navImInput,
   navZoomInput,
-  navJumpButton,
   navOriginButton,
   navCopyButton,
   navPasteButton,
+  navCurrentBlock,
+  navCurrentToggle,
+  navCurrentSummary,
+  navDestinationBlock,
+  navDestinationToggle,
+  navDestinationSummary,
+  destReInput,
+  destImInput,
+  destZoomInput,
+  destJumpButton,
+  destFlyToButton,
 } from './dom';
 import { showPerformanceOverlay } from './perf-overlay';
+import { beginFlyTo } from '../services/fly-to';
 
 function getWidth(): number {
   return settingsEngine.getValue('width') as number;
@@ -65,15 +77,9 @@ function formatCoord(value: number): string {
   return Number.isFinite(value) ? String(value) : '';
 }
 
-// Fields the user has typed into but not yet committed (via Jump/Origin/Enter).
-// A background render completing must NOT overwrite these — otherwise typing a
-// coordinate and clicking away (or clicking Jump) would reset the field before
-// it's used. Genuine view movement (pan/zoom) still forces a refresh.
+// Live readout of the current view into the (read-only) Current fields. Skips
+// the field under the caret, and preserves a pending edit unless the view moved.
 const navDirtyFields = new Set<HTMLInputElement>();
-
-function markNavFieldDirty(input: HTMLInputElement) {
-  navDirtyFields.add(input);
-}
 
 function syncNavField(input: HTMLInputElement, value: number, force: boolean) {
   // Never write into the field under the caret, and skip user-edited fields
@@ -95,6 +101,51 @@ export function updateNavigatorReadout(force = false) {
   syncNavField(navReInput, state.view.centerRe, force);
   syncNavField(navImInput, state.view.centerIm, force);
   syncNavField(navZoomInput, state.view.zoom, force);
+  renderCurrentSummary();
+}
+
+// Build the one-line collapsed summary for a coordinate triple, e.g.
+// "Re -0.7269…  Im 0.1889…  Z 1.2e4×". Each field is truncated independently
+// (see truncateNumericString) so nearby points keep their distinguishing tail.
+function buildCollapsedSummary(re: number, im: number, zoom: number): string {
+  const reStr = truncateNumericString(formatCoord(re));
+  const imStr = truncateNumericString(formatCoord(im));
+  // Scientific notation for zoom, dropping the '+' so it reads "1.2e4×".
+  const zoomStr = truncateNumericString(`${zoom.toExponential(1).replace('e+', 'e')}×`);
+  return `Re ${reStr}  Im ${imStr}  Z ${zoomStr}`;
+}
+
+function renderCurrentSummary(): void {
+  navCurrentSummary.textContent = buildCollapsedSummary(
+    state.view.centerRe,
+    state.view.centerIm,
+    state.view.zoom,
+  );
+}
+
+// Refresh the Destination block's collapsed summary from whatever is currently
+// typed. Invalid/empty fields fall back to an em dash so the line stays aligned.
+function renderDestinationSummary(): void {
+  const re = Number.parseFloat(destReInput.value);
+  const im = Number.parseFloat(destImInput.value);
+  const zoom = Number.parseFloat(destZoomInput.value);
+  if (!Number.isFinite(re) || !Number.isFinite(im) || !Number.isFinite(zoom)) {
+    navDestinationSummary.textContent = '—';
+    return;
+  }
+  navDestinationSummary.textContent = buildCollapsedSummary(re, im, zoom);
+}
+
+// Collapse/expand one nav block via a plain class toggle (mirrors the existing
+// .is-stuck pattern — no animation library). The CSS `grid-template-rows`
+// transition does the height animation; we only flip the class + aria state.
+function setBlockCollapsed(block: HTMLElement, toggle: HTMLButtonElement, collapsed: boolean): void {
+  block.classList.toggle('is-collapsed', collapsed);
+  toggle.setAttribute('aria-expanded', String(!collapsed));
+}
+
+function toggleBlock(block: HTMLElement, toggle: HTMLButtonElement): void {
+  setBlockCollapsed(block, toggle, !block.classList.contains('is-collapsed'));
 }
 
 // Parse a single coordinate field. Marks the field invalid (and returns null)
@@ -106,17 +157,32 @@ function readCoordField(input: HTMLInputElement, opts: { positive?: boolean } = 
   return ok ? parsed : null;
 }
 
-function performJump() {
-  const re = readCoordField(navReInput);
-  const im = readCoordField(navImInput);
-  const zoom = readCoordField(navZoomInput, { positive: true });
+// Reads the staged Destination fields — the coordinate the user is composing as
+// a travel target, independent of the live view — and jumps there instantly.
+function performDestinationJump() {
+  const re = readCoordField(destReInput);
+  const im = readCoordField(destImInput);
+  const zoom = readCoordField(destZoomInput, { positive: true });
   if (re === null || im === null || zoom === null) {
     return;
   }
-  navReInput.blur();
-  navImInput.blur();
-  navZoomInput.blur();
+  destReInput.blur();
+  destImInput.blur();
+  destZoomInput.blur();
   jumpTo(re, im, zoom);
+}
+
+// Reads the staged Destination fields and flies there with the animated camera
+// flight (beginFlyTo) — as opposed to performDestinationJump, which snaps
+// instantly via jumpTo.
+function performFlyTo(): void {
+  const re = readCoordField(destReInput);
+  const im = readCoordField(destImInput);
+  const zoom = readCoordField(destZoomInput, { positive: true });
+  if (re === null || im === null || zoom === null) {
+    return;
+  }
+  beginFlyTo({ centerRe: re, centerIm: im, zoom });
 }
 
 async function copyCoordinates() {
@@ -130,8 +196,9 @@ async function copyCoordinates() {
 }
 
 // Pull the first three finite numbers out of arbitrary pasted text (tolerates
-// labels, parens, and scientific notation) and load them into the inputs. This
-// only stages the coordinates — the user still has to press Jump to travel.
+// labels, parens, and scientific notation) and load them into the Destination
+// block. The Destination block is the staged travel target, so pasting a
+// coordinate you found elsewhere lands there — the user then Jump or Deep Dive.
 async function pasteCoordinates() {
   let text = '';
   try {
@@ -146,15 +213,16 @@ async function pasteCoordinates() {
     flashButton(navPasteButton, 'Bad data');
     return;
   }
-  // Stage into the fields and mark them edited so live view updates don't
-  // overwrite them before the user commits with Jump.
-  navReInput.value = formatCoord(nums[0]);
-  navImInput.value = formatCoord(nums[1]);
-  navZoomInput.value = formatCoord(nums[2]);
-  [navReInput, navImInput, navZoomInput].forEach(stageNavigatorField);
-  // Hand focus to Jump so the user can commit with a single Enter/Space press
-  // instead of having to click the button (focus was on Paste until now).
-  navJumpButton.focus();
+  // Stage into the Destination fields and expand the block so the user sees the
+  // pasted values before committing.
+  destReInput.value = formatCoord(nums[0]);
+  destImInput.value = formatCoord(nums[1]);
+  destZoomInput.value = formatCoord(nums[2]);
+  setBlockCollapsed(navDestinationBlock, navDestinationToggle, false);
+  renderDestinationSummary();
+  // Hand focus to the Destination Jump so the user can commit with a single
+  // Enter/Space press instead of having to click the button.
+  destJumpButton.focus();
 }
 
 function flashButton(button: HTMLButtonElement, label: string) {
@@ -418,32 +486,6 @@ function handleCanvasContextMenu(event: MouseEvent): void {
   }
 }
 
-// Wire the per-field listeners for one navigator coordinate input: mark it dirty
-// on edit (so live view updates don't clobber a pending edit) and commit the
-// jump on Enter.
-function bindNavigatorField(input: HTMLInputElement): void {
-  function handleFieldEdit(): void {
-    markNavFieldDirty(input);
-  }
-  input.addEventListener('input', handleFieldEdit);
-  input.addEventListener('keydown', handleNavigatorFieldKeydown);
-}
-
-function handleNavigatorFieldKeydown(event: KeyboardEvent): void {
-  if (event.key === 'Enter') {
-    event.preventDefault();
-    performJump();
-  }
-}
-
-// Stage a pasted coordinate into its field: clear any invalid styling and mark
-// the field as a pending (user) edit so live view updates don't overwrite it
-// before the user commits with Jump.
-function stageNavigatorField(input: HTMLInputElement): void {
-  input.classList.remove('nav-invalid');
-  markNavFieldDirty(input);
-}
-
 export function wireControls() {
   renderButton.addEventListener('click', handleRenderButtonClick);
   exportLogsButton.addEventListener('click', handleExportLogsButtonClick);
@@ -457,11 +499,22 @@ export function wireControls() {
   // Disable default context menu and handle right-click to zoom out.
   canvas.addEventListener('contextmenu', handleCanvasContextMenu);
 
-  navJumpButton.addEventListener('click', performJump);
   navOriginButton.addEventListener('click', resetView);
   navCopyButton.addEventListener('click', copyCoordinates);
   navPasteButton.addEventListener('click', pasteCoordinates);
-  [navReInput, navImInput, navZoomInput].forEach(bindNavigatorField);
+
+  // Current / Destination collapse toggles (both default to collapsed in HTML).
+  navCurrentToggle.addEventListener('click', () => toggleBlock(navCurrentBlock, navCurrentToggle));
+  navDestinationToggle.addEventListener('click', () => toggleBlock(navDestinationBlock, navDestinationToggle));
+
+  // Destination block: staged travel target. Jump commits instantly; Fly To
+  // animates the camera there (beginFlyTo).
+  destJumpButton.addEventListener('click', performDestinationJump);
+  destFlyToButton.addEventListener('click', performFlyTo);
+  [destReInput, destImInput, destZoomInput].forEach((input) =>
+    input.addEventListener('input', renderDestinationSummary),
+  );
+  navDestinationSummary.textContent = '—';
 
   initNavigatorSticky();
 

@@ -67,6 +67,7 @@ h1 {
   backdrop-filter: blur(6px);
   display: grid;
   gap: 0.5rem;
+  min-width: 0;
   transition: box-shadow 0.15s ease, border-color 0.15s ease;
 }
 
@@ -117,6 +118,7 @@ h1 {
   grid-template-columns: 2.6rem 1fr;
   align-items: center;
   gap: 0.5rem;
+  min-width: 0;
 }
 
 .nav-field label {
@@ -128,6 +130,7 @@ h1 {
 
 .nav-field input {
   width: 100%;
+  min-width: 0;
   padding: 0.4rem 0.5rem;
   border-radius: 0.4rem;
   border: 1px solid rgba(255, 255, 255, 0.12);
@@ -166,6 +169,92 @@ h1 {
 
 .nav-button-row .nav-secondary:hover {
   background: rgba(148, 163, 184, 0.3);
+}
+
+/* Collapsible Current / Destination blocks. The whole point of collapsing is to
+   keep the card near its original footprint even with two blocks instead of one
+   — both default to collapsed (HTML) and expand only on user interaction. */
+.nav-block {
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  padding-top: 0.5rem;
+  display: grid;
+  gap: 0.4rem;
+  min-width: 0;
+}
+
+.nav-block-toggle {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem 0.4rem;
+  width: 100%;
+  padding: 0.1rem 0;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #cbd5e1;
+  font: inherit;
+  text-align: left;
+}
+
+.nav-block-chevron {
+  display: inline-block;
+  font-size: 0.7rem;
+  color: #94a3b8;
+  transform: rotate(0deg); /* collapsed: points right (▸) */
+  transition: transform 0.2s ease;
+}
+
+.nav-block:not(.is-collapsed) .nav-block-chevron {
+  transform: rotate(90deg); /* expanded: points down (▾) */
+}
+
+.nav-block-title {
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.nav-block-summary {
+  /* When collapsed the summary drops to its own full-width line below the
+     chevron + title (flex-wrap above), so a long coordinate never overflows the
+     narrow sidebar. It wraps rather than clipping so it stays readable. */
+  flex-basis: 100%;
+  margin-left: 0;
+  font-size: 0.74rem;
+  color: #94a3b8;
+  font-family: "SFMono-Regular", ui-monospace, Menlo, Consolas, monospace;
+  font-variant-numeric: tabular-nums;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+/* Summary is redundant once the full fields are visible. */
+.nav-block:not(.is-collapsed) .nav-block-summary {
+  display: none;
+}
+
+/* Height animation via grid-template-rows 1fr <-> 0fr: a plain class toggle
+   (mirrors the .is-stuck pattern), no animation library. The inner wraps the
+   content with overflow:hidden so it collapses to zero height cleanly. */
+.nav-block-body {
+  display: grid;
+  grid-template-rows: 1fr;
+  transition: grid-template-rows 0.2s ease;
+  min-height: 0;
+}
+
+.nav-block.is-collapsed .nav-block-body {
+  grid-template-rows: 0fr;
+}
+
+.nav-block-inner {
+  overflow: hidden;
+  min-height: 0;
+  min-width: 0;
+  display: grid;
+  gap: 0.5rem;
 }
 
 label {

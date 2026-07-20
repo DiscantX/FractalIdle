@@ -18,10 +18,25 @@ export const navSentinel = document.querySelector<HTMLElement>('#navSentinel')!;
 export const navReInput = document.querySelector<HTMLInputElement>('#navReInput')!;
 export const navImInput = document.querySelector<HTMLInputElement>('#navImInput')!;
 export const navZoomInput = document.querySelector<HTMLInputElement>('#navZoomInput')!;
-export const navJumpButton = document.querySelector<HTMLButtonElement>('#navJumpButton')!;
 export const navOriginButton = document.querySelector<HTMLButtonElement>('#navOriginButton')!;
 export const navCopyButton = document.querySelector<HTMLButtonElement>('#navCopyButton')!;
 export const navPasteButton = document.querySelector<HTMLButtonElement>('#navPasteButton')!;
+
+// Collapsible Current / Destination blocks (nav-card redesign). Toggle buttons
+// own aria-expanded; the blocks carry .is-collapsed for the CSS height transition.
+export const navCurrentBlock = document.querySelector<HTMLElement>('#navCurrentBlock')!;
+export const navCurrentToggle = document.querySelector<HTMLButtonElement>('#navCurrentToggle')!;
+export const navCurrentSummary = document.querySelector<HTMLElement>('#navCurrentSummary')!;
+export const navDestinationBlock = document.querySelector<HTMLElement>('#navDestinationBlock')!;
+export const navDestinationToggle = document.querySelector<HTMLButtonElement>('#navDestinationToggle')!;
+export const navDestinationSummary = document.querySelector<HTMLElement>('#navDestinationSummary')!;
+
+// Destination (staged target) coordinate fields + actions.
+export const destReInput = document.querySelector<HTMLInputElement>('#destReInput')!;
+export const destImInput = document.querySelector<HTMLInputElement>('#destImInput')!;
+export const destZoomInput = document.querySelector<HTMLInputElement>('#destZoomInput')!;
+export const destJumpButton = document.querySelector<HTMLButtonElement>('#destJumpButton')!;
+export const destFlyToButton = document.querySelector<HTMLButtonElement>('#destFlyToButton')!;
 
 const ctx = canvas.getContext('2d');
 if (!ctx) {

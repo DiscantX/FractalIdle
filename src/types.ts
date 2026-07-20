@@ -7,9 +7,7 @@ export type ViewState = {
 export type ZoomAnimationState = {
   from: ViewState;
   to: ViewState;
-  startTime: number;
   duration: number;
-  frameId: number | null;
   originX: number;
   originY: number;
   previewCanvas: HTMLCanvasElement;

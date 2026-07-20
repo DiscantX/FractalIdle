@@ -9,6 +9,7 @@ export const SECTIONS: SettingSectionDefinition[] = [
   { id: 'cache', title: 'Tile cache' },
   { id: 'zoom', title: 'Zoom' },
   { id: 'view', title: 'View' },
+  { id: 'fly-to', title: 'Fly to' },
   { id: 'color-palette', title: 'Color palette' },
   { id: 'palette-range', title: 'Palette range' },
   { id: 'adjust-colors', title: 'Adjust colors' },
@@ -167,6 +168,61 @@ export const coreSettings: SettingDefinition[] = [
   { id: 'flipX', kind: 'checkbox', label: 'Flip horizontally', section: 'view', default: false, rerender: true },
   { id: 'flipY', kind: 'checkbox', label: 'Flip vertically', section: 'view', default: false, rerender: true },
 
+  // --- Fly to ---
+  // Fly-to is the animated flight from the current view to a staged destination
+  // (the Destination block's "Fly To" button). It renders the fractal along the
+  // path, so the flight must be paced slowly enough for renders to keep up —
+  // hence the generous defaults below. Duration is a swappable strategy, not a
+  // hardcoded formula: 'clamped-linear' gives predictable per-octave pacing (a
+  // fixed time per zoom level, capped), 'clamped-sqrt' front-loads speed with
+  // diminishing returns, and 'linear' (uncapped) is the idle-game pacing preview
+  // where a 60-octave dive really takes 60× a 1-octave one. All rerender:false —
+  // they only affect animation timing, not the render pipeline.
+  //
+  // Duration model: total ms = base + perOctave × octaves (clamped for the two
+  // 'clamped-*' curves). "Duration per octave" is the primary speed slider —
+  // higher = slower travel = more time for the fractal to resolve at each depth.
+  {
+    // How center (Re/Im) moves relative to zoom. 'smart' pans early so you
+    // descend onto the target instead of diving into the start-center (black)
+    // then panning at the end; 'pan-then-zoom' pans first at the start zoom then
+    // zooms straight in; 'linear' is the naive world-space pan (has the artifact,
+    // kept for comparison). See fly-to.ts.
+    id: 'flyToPathMode', kind: 'select', label: 'Path', section: 'fly-to', default: 'smart', rerender: false,
+    options: [
+      { value: 'smart', label: 'Smart (pan + zoom, target-locked)' },
+      { value: 'pan-then-zoom', label: 'Pan, then zoom' },
+      { value: 'linear', label: 'Linear (naive — for comparison)' },
+    ],
+  },
+  {
+    id: 'flyToDurationCurve', kind: 'select', label: 'Duration curve', section: 'fly-to', default: 'clamped-linear', rerender: false,
+    options: [
+      { value: 'clamped-linear', label: 'Clamped linear (fixed time / octave)' },
+      { value: 'clamped-sqrt', label: 'Clamped √ (front-loaded, diminishing)' },
+      { value: 'linear', label: 'Linear (no cap — idle-game pacing)' },
+    ],
+  },
+  {
+    id: 'flyToPerOctaveMs', kind: 'slider', label: 'Duration per octave (ms)', section: 'fly-to',
+    default: 900, min: 0, max: 8000, step: 50, rerender: false, format: (v) => `${(v / 1000).toFixed(2)} s`,
+  },
+  {
+    id: 'flyToBaseMs', kind: 'slider', label: 'Base duration (ms)', section: 'fly-to',
+    default: 400, min: 0, max: 10000, step: 50, rerender: false, format: (v) => `${(v / 1000).toFixed(2)} s`,
+  },
+  {
+    id: 'flyToMinMs', kind: 'slider', label: 'Min duration (ms)', section: 'fly-to',
+    default: 400, min: 0, max: 20000, step: 50, rerender: false, format: (v) => `${(v / 1000).toFixed(2)} s`,
+  },
+  {
+    // Caps the two 'clamped-*' curves; ignored by 'linear'. High so long dives
+    // aren't cut short — lower it if you want a hard ceiling on flight time.
+    id: 'flyToMaxMs', kind: 'slider', label: 'Max duration (ms)', section: 'fly-to',
+    default: 120000, min: 1000, max: 300000, step: 1000, rerender: false, format: (v) => `${(v / 1000).toFixed(0)} s`,
+    visibleWhen: (s) => s.flyToDurationCurve !== 'linear',
+  },
+
   // --- Color palette ---
   {
     id: 'colorMode', kind: 'select', label: 'Color mode', section: 'color-palette', default: 'escape-time', rerender: true,
@@ -235,10 +291,6 @@ export const coreSettings: SettingDefinition[] = [
   {
     id: 'animationSpeed', kind: 'slider', label: 'Speed (cycles/sec)', section: 'color-animation',
     default: 0.2, min: 0.01, max: 2, step: 0.01, rerender: false, format: (v) => v.toFixed(2),
-  },
-  {
-    id: 'deepDiveZoomSpeed', kind: 'slider', label: 'Deep-dive speed (octaves/sec)', section: 'color-animation',
-    default: 0.5, min: 0.05, max: 4, step: 0.05, rerender: false, format: (v) => v.toFixed(2),
   },
   {
     id: 'animationControls', kind: 'custom', section: 'color-animation',

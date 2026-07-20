@@ -20,25 +20,64 @@
           <span class="nav-card-title">Navigate</span>
           <div class="nav-card-actions">
             <button id="navCopyButton" type="button" class="nav-icon-button" title="Copy current coordinates">Copy</button>
-            <button id="navPasteButton" type="button" class="nav-icon-button" title="Paste coordinates and jump">Paste</button>
+            <button id="navPasteButton" type="button" class="nav-icon-button" title="Paste coordinates into Destination">Paste</button>
           </div>
         </div>
-        <div class="nav-field">
-          <label for="navReInput">Re</label>
-          <input id="navReInput" type="text" inputmode="decimal" spellcheck="false" autocomplete="off" />
-        </div>
-        <div class="nav-field">
-          <label for="navImInput">Im</label>
-          <input id="navImInput" type="text" inputmode="decimal" spellcheck="false" autocomplete="off" />
-        </div>
-        <div class="nav-field">
-          <label for="navZoomInput">Zoom</label>
-          <input id="navZoomInput" type="text" inputmode="decimal" spellcheck="false" autocomplete="off" />
-        </div>
-        <div class="nav-button-row">
-          <button id="navJumpButton" type="button">Jump</button>
-          <button id="navOriginButton" type="button" class="nav-secondary">Origin</button>
-        </div>
+
+        <section id="navCurrentBlock" class="nav-block is-collapsed" data-block="current">
+          <button id="navCurrentToggle" type="button" class="nav-block-toggle" aria-expanded="false" aria-controls="navCurrentBody">
+            <span class="nav-block-chevron" aria-hidden="true">▸</span>
+            <span class="nav-block-title">Current</span>
+            <span id="navCurrentSummary" class="nav-block-summary"></span>
+          </button>
+          <div id="navCurrentBody" class="nav-block-body">
+            <div class="nav-block-inner">
+              <div class="nav-field">
+                <label for="navReInput">Re</label>
+                <input id="navReInput" type="text" inputmode="decimal" spellcheck="false" autocomplete="off" readonly />
+              </div>
+              <div class="nav-field">
+                <label for="navImInput">Im</label>
+                <input id="navImInput" type="text" inputmode="decimal" spellcheck="false" autocomplete="off" readonly />
+              </div>
+              <div class="nav-field">
+                <label for="navZoomInput">Zoom</label>
+                <input id="navZoomInput" type="text" inputmode="decimal" spellcheck="false" autocomplete="off" readonly />
+              </div>
+              <div class="nav-button-row">
+                <button id="navOriginButton" type="button" class="nav-secondary">Origin</button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section id="navDestinationBlock" class="nav-block is-collapsed" data-block="destination">
+          <button id="navDestinationToggle" type="button" class="nav-block-toggle" aria-expanded="false" aria-controls="navDestinationBody">
+            <span class="nav-block-chevron" aria-hidden="true">▸</span>
+            <span class="nav-block-title">Destination</span>
+            <span id="navDestinationSummary" class="nav-block-summary"></span>
+          </button>
+          <div id="navDestinationBody" class="nav-block-body">
+            <div class="nav-block-inner">
+              <div class="nav-field">
+                <label for="destReInput">Re</label>
+                <input id="destReInput" type="text" inputmode="decimal" spellcheck="false" autocomplete="off" />
+              </div>
+              <div class="nav-field">
+                <label for="destImInput">Im</label>
+                <input id="destImInput" type="text" inputmode="decimal" spellcheck="false" autocomplete="off" />
+              </div>
+              <div class="nav-field">
+                <label for="destZoomInput">Zoom</label>
+                <input id="destZoomInput" type="text" inputmode="decimal" spellcheck="false" autocomplete="off" />
+              </div>
+              <div class="nav-button-row">
+                <button id="destJumpButton" type="button">Jump</button>
+                <button id="destFlyToButton" type="button" class="nav-secondary">Fly To</button>
+              </div>
+            </div>
+          </div>
+        </section>
       </div>
 
       <div id="settingsContainer"></div>

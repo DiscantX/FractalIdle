@@ -1,9 +1,8 @@
 import { settingsEngine } from '../settings/instance';
-import { paintBaseScalarFrame, paintUniformColorFrame, requestRender, isRenderActive } from './renderer';
+import { paintBaseScalarFrame, paintUniformColorFrame, requestRender } from './renderer';
 import { clamp01 } from '../utils/math';
 import { state } from '../state';
-import { zoomCallbacks } from './zoom-manager';
-import { markDebug } from '../utils/debug';
+import { isFlyingTo } from './fly-to';
 
 // --- Color animation ------------------------------------------------------
 // Drives the Stage-2 color params over time to animate the frame WITHOUT
@@ -52,13 +51,14 @@ export const animationCallbacks = {
 
 // True while the smooth-zoom animation owns the live canvas via its own rAF: the
 // zoom step is tightly coupled to the per-frame view interpolation, so it paints
-// the uniform frame itself and this loop must not double-paint. The loop still
-// advances the hue so the zoom step reads the live value. Panning is NOT included:
-// the color loop paints pan frames (it reads the live state.view, updated by the
-// drag) so detail keeps resolving between mouse moves — updatePanPreview defers
-// painting to it while animating.
+// the uniform frame itself and this loop must not double-paint. A fly-to flight
+// likewise paints its own uniform frame each step, so it's excluded too. The loop
+// still advances the hue so their present reads the live value. Panning is NOT
+// included: the color loop paints pan frames (it reads the live state.view,
+// updated by the drag) so detail keeps resolving between mouse moves —
+// updatePanPreview defers painting to it while animating.
 function interactionOwnsCanvas(): boolean {
-  return state.zoomAnimation !== null;
+  return state.zoomAnimation !== null || isFlyingTo();
 }
 
 // Map the current phase onto the active animation's target setting, then paint
@@ -74,12 +74,13 @@ function applyPhase(): void {
   }
 
   // Paint only when nothing else owns the canvas. A gesture (zoom/pan) paints its
-  // own uniform frame; the deep-dive loop paints every frame too. In both cases
-  // this loop just keeps the hue advancing (above) so their present reads the
-  // live hue — it must not also paint here, or fire cache-canceling renders.
-  if (!interactionOwnsCanvas() && !dive.active) {
+  // own uniform frame; the smooth-zoom step paints its own uniform frame too. In
+  // both cases this loop just keeps the hue advancing (above) so their present
+  // reads the live hue — it must not also paint here, or fire cache-canceling
+  // renders.
+  if (!interactionOwnsCanvas()) {
     // Fast path: exact-view base frame. Fall back to the general uniform path
-    // (gap-free, any view) so the cycle keeps running through gesture/dive
+    // (gap-free, any view) so the cycle keeps running through gesture
     // transitions where the captured base is momentarily stale — instead of
     // failing and stalling. Only ask for a render when nothing is cached at all.
     const painted = paintBaseScalarFrame() || paintUniformColorFrame();
@@ -161,98 +162,4 @@ export function getAnimationPhase(): number {
 
 export function isAnimationPlaying(): boolean {
   return anim.playing;
-}
-
-// --- Automated continuous deep-dive -----------------------------------------
-// A hands-free continuous zoom toward a target center, painted via the same
-// uniform-color path used by the color animation (paintUniformColorFrame), so it
-// descends with a single consistent hue. Tier-1 tiles are prefetched AHEAD of the
-// descent (throttled present:false renders + the existing look-ahead settings) so
-// the view stays ahead of the cache and never fills with placeholder. Built
-// entirely on the shared scalar-frame pipeline — no new rendering concepts.
-//
-// Can run with the hue cycle playing (cycled descent) or on its own (static hue).
-// Exposed as a clean API for the game to drive programmatically.
-type DeepDiveState = {
-  active: boolean;
-  rafId: number | null;
-  lastTs: number | null;
-  centerRe: number;
-  centerIm: number;
-};
-
-const dive: DeepDiveState = {
-  active: false,
-  rafId: null,
-  lastTs: null,
-  centerRe: 0,
-  centerIm: 0,
-};
-
-export const deepDiveCallbacks = {
-  onStateChange: (_active: boolean) => {},
-};
-
-// Start a continuous zoom-in. `opts.center` lets the game (or a UI) aim the
-// descent at a specific point; defaults to the current view center.
-export function startDeepDive(opts?: { center?: { re: number; im: number } }): void {
-  if (dive.active) return;
-  dive.active = true;
-  dive.lastTs = null;
-  dive.centerRe = opts?.center?.re ?? state.view.centerRe;
-  dive.centerIm = opts?.center?.im ?? state.view.centerIm;
-  deepDiveCallbacks.onStateChange(true);
-  markDebug('deepdive:start', { centerRe: dive.centerRe, centerIm: dive.centerIm, zoom: state.view.zoom });
-  dive.rafId = requestAnimationFrame(diveStep);
-}
-
-export function stopDeepDive(): void {
-  if (!dive.active) return;
-  dive.active = false;
-  if (dive.rafId !== null) {
-    cancelAnimationFrame(dive.rafId);
-    dive.rafId = null;
-  }
-  deepDiveCallbacks.onStateChange(false);
-  // Land on a crisp exact frame: the last dive frame may be a soft (upscaled)
-  // fallback while the exact level was still computing. A normal render presents
-  // the exact level (colorized at the current hue) once its tiles are ready.
-  requestRender();
-}
-
-export function isDeepDiving(): boolean {
-  return dive.active;
-}
-
-function diveStep(ts: number): void {
-  if (!dive.active) return;
-  if (dive.lastTs === null) dive.lastTs = ts;
-  const dt = (ts - dive.lastTs) / 1000;
-  dive.lastTs = ts;
-
-  // deepDiveZoomSpeed is octaves/sec. Convert to a per-second zoom multiplier.
-  const octavesPerSec = settingsEngine.getValue('deepDiveZoomSpeed') as number;
-  const zoomFactor = Math.pow(2, octavesPerSec * dt);
-  state.view.zoom *= zoomFactor;
-  state.view.centerRe = dive.centerRe;
-  state.view.centerIm = dive.centerIm;
-  zoomCallbacks.onViewUpdate(); // live coordinate read-out
-
-  // Keep the cache ahead of the descent, but only issue a new render once the
-  // previous one has drained. requestRender bumps activeRenderId and drops the
-  // prior render's in-flight tiles as stale, so firing every frame (60fps) would
-  // cancel work before any tile is cached — nothing would ever finish. Waiting on
-  // isRenderActive() gives a self-paced chase: render the current view, let it
-  // complete (its look-ahead also warms deeper levels), then aim the next one at
-  // the now-deeper view. present:false — the dive owns the screen; the
-  // uniform-color paint below is the only thing shown. Meanwhile the coverage
-  // fallback in assembleUniformColorViewport keeps every frame gap-free (a
-  // complete shallower level upscaled) until the exact level lands.
-  if (!isRenderActive()) {
-    requestRender(undefined, undefined, { view: { ...state.view }, present: false });
-  }
-
-  paintUniformColorFrame(state.view);
-
-  dive.rafId = requestAnimationFrame(diveStep);
 }

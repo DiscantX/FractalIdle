@@ -7,17 +7,12 @@ import {
   getAnimationPhase,
   isAnimationPlaying,
   animationCallbacks,
-  startDeepDive,
-  stopDeepDive,
-  isDeepDiving,
-  deepDiveCallbacks,
 } from '../services/color-animation';
 
-// Builds the color-animation transport: play/pause toggle, stop, a deep-dive
-// toggle, and a scrubber that mirrors (and grabs control from) the running loop.
-// Rendered into a custom settings field — see the 'color-animation' section in
-// the registry. This file is the UI half; the loops live in
-// services/color-animation.ts.
+// Builds the color-animation transport: play/pause toggle, stop, and a scrubber
+// that mirrors (and grabs control from) the running loop. Rendered into a custom
+// settings field — see the 'color-animation' section in the registry. This file
+// is the UI half; the loop lives in services/color-animation.ts.
 export function renderAnimationControls(_api: SettingChangeApi): HTMLElement {
   const wrap = document.createElement('div');
   wrap.className = 'anim-controls';
@@ -34,14 +29,8 @@ export function renderAnimationControls(_api: SettingChangeApi): HTMLElement {
   stop.textContent = 'Stop';
   stop.className = 'nav-secondary';
 
-  const deepDive = document.createElement('button');
-  deepDive.type = 'button';
-  deepDive.textContent = 'Deep dive';
-  deepDive.className = 'nav-secondary';
-
   buttons.appendChild(playPause);
   buttons.appendChild(stop);
-  buttons.appendChild(deepDive);
 
   const scrubRow = document.createElement('div');
   scrubRow.className = 'value-row';
@@ -62,10 +51,6 @@ export function renderAnimationControls(_api: SettingChangeApi): HTMLElement {
   const syncState = (playing: boolean) => {
     playPause.textContent = playing ? 'Pause' : 'Play';
     playPause.classList.toggle('is-playing', playing);
-  };
-  const syncDive = (active: boolean) => {
-    deepDive.textContent = active ? 'Stop dive' : 'Deep dive';
-    deepDive.classList.toggle('is-playing', active);
   };
   const syncScrub = (phase: number) => {
     // The scrubber is read-only feedback while playing; only move it when the
@@ -88,18 +73,10 @@ export function renderAnimationControls(_api: SettingChangeApi): HTMLElement {
     setAnimationPhase(Number(scrub.value));
   });
 
-  deepDive.addEventListener('click', () => {
-    if (isDeepDiving()) stopDeepDive();
-    else startDeepDive();
-  });
-
-  // Keep the controls in sync with the loops (play button label, deep-dive
-  // button label, scrubber).
+  // Keep the controls in sync with the loop (play button label, scrubber).
   animationCallbacks.onStateChange = syncState;
   animationCallbacks.onPhaseChange = syncScrub;
-  deepDiveCallbacks.onStateChange = syncDive;
   syncState(isAnimationPlaying());
-  syncDive(isDeepDiving());
 
   return wrap;
 }
