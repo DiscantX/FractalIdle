@@ -3,11 +3,13 @@
 // float64 regardless of how the orbit itself was computed. See
 // perturbation-precision-handoff.md.
 export type ReferenceOrbit = {
-  // Z_n values, index = iteration number.
+  // The reference point's own c value — needed to reconstruct a pixel's
+  // actual c (referenceC + deltaC) for geometric culling and for the
+  // orbit-exhaustion fallback to direct iteration.
+  cRe: number;
+  cIm: number;
   re: Float64Array;
   im: Float64Array;
-  // Iterations actually computed (<= maxIterations — stops early if the
-  // reference point itself escapes).
   length: number;
   escaped: boolean;
 };

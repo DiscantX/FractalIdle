@@ -130,9 +130,125 @@ export function computeReferenceOrbit(
   }
 
   return {
+    cRe,
+    cIm,
     re,
     im,
-    length: iter + 1, // includes index 0
+    length: iter + 1,
     escaped: iter < maxIterations,
   };
+}
+
+/**
+ * Per-pixel delta iteration against a precomputed reference orbit.
+ * geometricCulling / periodicityChecking mirror escapeIterations's contract,
+ * applied to the pixel's actual reconstructed z/c — see notes below.
+ *
+ * If the reference orbit runs out before this pixel escapes or maxIterations
+ * is reached (the reference point itself escaped early), falls back to
+ * direct iteration from the last known z, continuing the iteration count
+ * rather than restarting it. This is a narrower, deterministic case of the
+ * general "glitch fallback" pattern production perturbation renderers use —
+ * it doesn't require the general glitch-detection machinery deferred earlier,
+ * since "ran out of orbit data" is a simple length check, not a heuristic.
+ */
+export function perturbationEscapeIterations(
+  orbit: ReferenceOrbit,
+  deltaRe: number,
+  deltaIm: number,
+  maxIterations: number,
+  geometricCulling: boolean,
+  periodicityChecking: boolean
+): { iterations: number; escapeRadiusSquared: number } {
+  const pixelCre = orbit.cRe + deltaRe;
+  const pixelCim = orbit.cIm + deltaIm;
+
+  if (geometricCulling && isInMainCardioidOrBulb(pixelCre, pixelCim)) {
+    return { iterations: maxIterations, escapeRadiusSquared: 0 };
+  }
+
+  // δ_0 = 0 for every pixel — NOT deltaRe/deltaIm. Both the reference point
+  // and every pixel start their Mandelbrot orbit at z=0 regardless of c, so
+  // there is no initial offset between them. δc (deltaRe/deltaIm) only enters
+  // as the additive term inside the iteration formula below. Starting dRe/dIm
+  // at deltaRe/deltaIm instead of 0 is the single most common perturbation
+  // implementation bug — worth internalizing why it's wrong, not just avoiding it.
+  let dRe = 0;
+  let dIm = 0;
+  let iter = 0;
+  const escapeRadiusSquared = 4;
+
+  let checkRe = 0;
+  let checkIm = 0;
+  let checkCounter = 0;
+  let checkPeriod = 10;
+
+  while (iter < maxIterations && iter < orbit.length - 1) {
+    const zRefRe = orbit.re[iter];
+    const zRefIm = orbit.im[iter];
+
+    // δ_{n+1} = 2·Z_n·δ_n + δ_n² + δc
+    const nextDre = 2 * (zRefRe * dRe - zRefIm * dIm) + (dRe * dRe - dIm * dIm) + deltaRe;
+    const nextDim = 2 * (zRefRe * dIm + zRefIm * dRe) + 2 * dRe * dIm + deltaIm;
+    dRe = nextDre;
+    dIm = nextDim;
+    iter += 1;
+
+    const zRe = orbit.re[iter] + dRe;
+    const zIm = orbit.im[iter] + dIm;
+    const mag = zRe * zRe + zIm * zIm;
+
+    if (mag >= escapeRadiusSquared) {
+      return { iterations: iter, escapeRadiusSquared: mag };
+    }
+
+    if (periodicityChecking) {
+      if (Math.abs(zRe - checkRe) < PERIODICITY_EPSILON && Math.abs(zIm - checkIm) < PERIODICITY_EPSILON) {
+        return { iterations: maxIterations, escapeRadiusSquared: mag };
+      }
+      checkCounter += 1;
+      if (checkCounter === checkPeriod) {
+        checkCounter = 0;
+        checkPeriod *= 2;
+        checkRe = zRe;
+        checkIm = zIm;
+      }
+    }
+  }
+
+  if (iter >= maxIterations) {
+    return { iterations: maxIterations, escapeRadiusSquared: 0 };
+  }
+
+  // Orbit exhausted — the reference point escaped before this pixel did (or
+  // before maxIterations was reached for an interior-looking pixel). Continue
+  // iterating directly from the last known z, using the pixel's own real c —
+  // the ordinary Mandelbrot formula, just picking up mid-orbit.
+  let zRe = orbit.re[iter] + dRe;
+  let zIm = orbit.im[iter] + dIm;
+  let mag = zRe * zRe + zIm * zIm;
+
+  while (iter < maxIterations && mag < escapeRadiusSquared) {
+    const nextRe = zRe * zRe - zIm * zIm + pixelCre;
+    const nextIm = 2 * zRe * zIm + pixelCim;
+    zRe = nextRe;
+    zIm = nextIm;
+    mag = zRe * zRe + zIm * zIm;
+    iter += 1;
+
+    if (periodicityChecking) {
+      if (Math.abs(zRe - checkRe) < PERIODICITY_EPSILON && Math.abs(zIm - checkIm) < PERIODICITY_EPSILON) {
+        return { iterations: maxIterations, escapeRadiusSquared: mag };
+      }
+      checkCounter += 1;
+      if (checkCounter === checkPeriod) {
+        checkCounter = 0;
+        checkPeriod *= 2;
+        checkRe = zRe;
+        checkIm = zIm;
+      }
+    }
+  }
+
+  return { iterations: iter, escapeRadiusSquared: mag };
 }

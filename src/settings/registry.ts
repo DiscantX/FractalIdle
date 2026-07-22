@@ -36,7 +36,7 @@ export const coreSettings: SettingDefinition[] = [
   },
   {
     id: 'fillViewport', kind: 'checkbox', label: 'Canvas fill', section: 'canvas',
-    default: false, rerender: true,
+    default: true, rerender: true,
     onChange: (_value, api) => {
       api.syncCanvasSize();
      },
