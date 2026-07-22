@@ -6,7 +6,7 @@ This project contains a development version of a fractal renderer/explorer. It i
 
 ## Instructions
 
-`FractalIdleMDD.md` is the current and most up to date design document for the game. It is a work in progress and will be updated. Do not take it to be immutable or gospel truth; however, when in doubt, use it as a reference for the current state of the game design. The game is still in development and the document will be updated as new features are added and old features are modified or removed. If the document need to be modified, that should be flagged and discussed.
+`FractalIdleMDD.md` is the current and most up to date design document for the game. It is a work in progress and will be updated. Do not take it to be immutable or gospel truth; however, when in doubt, use it as a reference for the current state of the game design. The game is still in development and the document will be updated as new features are added and old features are modified or removed. If the document needs to be modified, that should be flagged and discussed.
 
 ### Archive
 

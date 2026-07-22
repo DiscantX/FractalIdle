@@ -188,6 +188,10 @@ const JANK_CULPRIT_DISPLAY_MS = 5000;
 let jankOffenders = new Map<string, {count: number, totalMs: number}>();
 let jankTooltipText = '';
 let jankTooltipEl: HTMLDivElement | null = null;
+let tooltipDirty = false; // set when jankOffenders changes; tooltip rebuilt lazily on show
+let tooltipRect: DOMRect | null = null; // cached perfOverlay rect (avoids layout read per mousemove)
+let tooltipRectStale = true; // true when the cached rect needs refresh
+let tooltipBuilt = false; // true after first build; ensures placeholder is shown on first hover
 
 function recordJank(entry: any): void {
   const dur = entry?.duration ?? 0;
@@ -209,6 +213,7 @@ function recordJank(entry: any): void {
     entryData.count += 1;
     entryData.totalMs += dur;
     jankOffenders.set(key, entryData);
+    tooltipDirty = true; // tooltip content needs rebuild
   }
 }
 
@@ -252,6 +257,8 @@ function shortenSrc(s: string): string {
 // offenders' own totalMs distribution (median = yellow midpoint, band = a
 // fraction of the median) rather than absolute ms, since "bad" depends on run
 // length — so the worst offenders read red and minor ones green.
+//
+// Early exit on clean state with no content to avoid work.
 function buildJankTooltip(): void {
   const root = jankTooltipEl;
   if (!root) return;
@@ -316,6 +323,11 @@ function buildJankTooltip(): void {
 }
 
 function showJankTooltip(): void {
+  if (tooltipDirty || !tooltipBuilt) {
+    buildJankTooltip();
+    tooltipDirty = false;
+    tooltipBuilt = true;
+  }
   if (jankTooltipEl && jankTooltipText) {
     jankTooltipEl.style.display = 'block';
   }
@@ -342,12 +354,25 @@ function scheduleJankCulpritClear(): void {
 // Driven by a window mousemove listener (the overlay itself gets no pointer
 // events). Shows the tooltip only while the cursor is over the overlay rect,
 // and flips/clamps it to stay inside the viewport.
+//
+// Performance: cache the overlay rect and tooltip dimensions to avoid forcing
+// layout on every mousemove. The rect is refreshed on scroll/resize or when
+// the tooltip becomes visible after being hidden.
 function onJankTooltipMouseMove(event: MouseEvent): void {
   if (!perfOverlay || perfOverlay.style.display === 'none' || !jankTooltipEl) {
     hideJankTooltip();
     return;
   }
-  const rect = perfOverlay.getBoundingClientRect();
+  // Refresh cached rect if it was marked stale (by scroll/resize/visibility)
+  if (tooltipRectStale) {
+    tooltipRect = perfOverlay.getBoundingClientRect();
+    tooltipRectStale = false;
+  }
+  const rect = tooltipRect;
+  if (!rect) {
+    hideJankTooltip();
+    return;
+  }
   const inside =
     event.clientX >= rect.left && event.clientX <= rect.right &&
     event.clientY >= rect.top && event.clientY <= rect.bottom;
@@ -355,11 +380,23 @@ function onJankTooltipMouseMove(event: MouseEvent): void {
     hideJankTooltip();
     return;
   }
-  showJankTooltip();
-  // Position near the cursor, flipping to the other side if it would overflow
-  // the right/bottom viewport edge (and clamping so it never leaves the top/left).
-  const tw = jankTooltipEl.offsetWidth;
-  const th = jankTooltipEl.offsetHeight;
+  // Build tooltip lazily if it's dirty OR if we've never built it before (to show placeholder)
+  if (tooltipDirty || !tooltipBuilt) {
+    buildJankTooltip();
+    tooltipDirty = false;
+    tooltipBuilt = true;
+  }
+  // Show first so offsetWidth/Height return correct values (0 when display:none)
+  jankTooltipEl.style.display = 'block';
+  // Cache tooltip dimensions to avoid repeated layout reads
+  let tw = jankTooltipEl.offsetWidth;
+  let th = jankTooltipEl.offsetHeight;
+  // If tooltip has no content yet (first call), getBoundingClientRect may return
+  // 0/0. Fall back to default size to avoid positioning issues.
+  if (tw === 0 && th === 0) {
+    tw = jankTooltipEl.getBoundingClientRect().width || 200;
+    th = jankTooltipEl.getBoundingClientRect().height || 100;
+  }
   const margin = 12;
   let left = event.clientX + margin;
   let top = event.clientY + margin;
@@ -847,6 +884,7 @@ function startMetricsLoop(): void {
       }
 
       // --- Memory ---
+      const estCacheMb = estimateCacheMb();
       overlay.appendChild(statLine(false, [
         sparklineFor('cache', cacheTiles, 'grp-memory'),
         titleSpan('grp-memory', padLabel('Cache', MEMORY_LABEL_W)),
@@ -855,10 +893,10 @@ function startMetricsLoop(): void {
         unitSpan(` tiles (color: ${colorTiles})`),
       ]));
       overlay.appendChild(statLine(false, [
-        sparklineFor('estcache', estimateCacheMb(), 'grp-memory'),
+        sparklineFor('estcache', estCacheMb, 'grp-memory'),
         titleSpan('grp-memory', padLabel('Est cache', MEMORY_LABEL_W)),
         textSpan(': '),
-        textSpan(`${estimateCacheMb().toFixed(1)}`),
+        textSpan(`${estCacheMb.toFixed(1)}`),
         unitSpan(' MB'),
       ]));
       if (memMb !== null) {
@@ -918,19 +956,12 @@ function startMetricsLoop(): void {
           }
         }
       }
-      // Tooltip: full list of offenders (counts + timing totals). Built every
-      // window and shown on hover via a custom element (native title is
-      // suppressed by the overlay's pointer-events: none). Offenders accumulate
-      // for the whole application lifetime and are never cleared (a default "no
-      // jank" message is shown until the first offender appears), so the tooltip
-      // always reflects the running totals of jank this run.
-      buildJankTooltip();
-
       // Reset per-window accumulators. NOTE: jankOffenders / jankTooltipText are
       // intentionally NOT cleared here — they accumulate for the application
-      // lifetime and are never invalidated, so the tooltip always reflects every
-      // offender seen this run (see scheduleJankCulpritClear: only the main
-      // display culprit is cleared, never the tooltip data).
+      // lifetime. The tooltip content is rebuilt lazily on hover (see onJankTooltipMouseMove:
+      // buildJankTooltip runs only if tooltipDirty is true, which is set in recordJank).
+      // Also mark tooltip rect stale since overlay content (height) changed.
+      tooltipRectStale = true;
       frameCount = 0;
       lastMetricsTime = now;
       jankAccumCount = 0;
@@ -978,6 +1009,11 @@ export function showPerformanceOverlay(): void {
   startJankObserver();
   jankCulpritStale = false; // fresh overlay = no stale indicator yet
   window.addEventListener('mousemove', onJankTooltipMouseMove);
+  // Prep tooltip layout caching
+  tooltipRect = null;
+  tooltipRectStale = true; // need to measure after any layout change
+  window.addEventListener('resize', () => { tooltipRectStale = true; });
+  window.addEventListener('scroll', () => { tooltipRectStale = true; });
 }
 
 function hidePerformanceOverlay(): void {
