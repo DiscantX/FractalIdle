@@ -1,3 +1,5 @@
+import type { ReferenceOrbit } from '../perturbation/types';
+
 // Core Mandelbrot strategy – pure mathematical helpers that can be shared
 // with other fractal implementations (Julia, Burning Ship, Buffalo, …).
 
@@ -90,4 +92,47 @@ export function escapeIterations(
   }
 
   return iter;
+}
+
+/**
+ * Iterates a single reference point through the full Mandelbrot loop,
+ * recording every Z value (not just the final count) for use as the
+ * reference orbit in perturbation rendering.
+ *
+ * Unlike escapeIterations, this runs once per frame rather than once per
+ * pixel, so the per-pixel speed optimizations (geometric culling,
+ * periodicity checking) are deliberately omitted — their cost doesn't matter
+ * here, and omitting them keeps the recorded orbit simple.
+ */
+export function computeReferenceOrbit(
+  cRe: number,
+  cIm: number,
+  maxIterations: number
+): ReferenceOrbit {
+  const re = new Float64Array(maxIterations + 1);
+  const im = new Float64Array(maxIterations + 1);
+  let zRe = 0;
+  let zIm = 0;
+  re[0] = zRe;
+  im[0] = zIm;
+
+  let iter = 0;
+  const escapeRadiusSquared = 4;
+
+  while (iter < maxIterations && (zRe * zRe + zIm * zIm) < escapeRadiusSquared) {
+    const nextRe = zRe * zRe - zIm * zIm + cRe;
+    const nextIm = 2 * zRe * zIm + cIm;
+    zRe = nextRe;
+    zIm = nextIm;
+    iter += 1;
+    re[iter] = zRe;
+    im[iter] = zIm;
+  }
+
+  return {
+    re,
+    im,
+    length: iter + 1, // includes index 0
+    escaped: iter < maxIterations,
+  };
 }
