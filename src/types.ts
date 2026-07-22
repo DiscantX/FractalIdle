@@ -1,3 +1,5 @@
+import type { ReferenceOrbit } from './core/perturbation/types';
+
 export type ViewState = {
   centerRe: number;
   centerIm: number;
@@ -93,6 +95,12 @@ export type WorkerTask = {
   solidGuessing: boolean;
   geometricCulling: boolean;
   periodicityChecking: boolean;
+  // Present only when perturbationMode is 'on' for a fractal type that
+  // supports it (Mandelbrot only, for now). Computed once per render layer on
+  // the main thread — see renderer.ts — and cloned into every tile task for
+  // that layer. Its absence is how the worker decides direct vs. perturbation
+  // iteration; there's no separate boolean.
+  referenceOrbit?: ReferenceOrbit;
   interiorDetail: boolean;
   interiorNoiseMode: 'single' | 'fractal';
   interiorNoiseStrength: number;

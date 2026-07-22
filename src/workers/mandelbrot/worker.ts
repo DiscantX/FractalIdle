@@ -8,6 +8,7 @@ import {
 // thread in Stage 2; the worker only emits the scalar field. See
 // color-stage-split-handoff.md.
 import { clamp01 } from '../../utils/math';
+import { perturbationEscapeIterations } from '../../core/strategies/mandelbrot';
 
 // -----------------------------------------------------
 // Solid-guessing heuristic
@@ -64,6 +65,7 @@ self.onmessage = (event: MessageEvent<WorkerTask>) => {
 
   const canSolidGuess =
     payload.solidGuessing &&
+    !payload.referenceOrbit &&
     payload.colorMode !== 'distance-estimation' &&
     (payload.colEnd - payload.colStart) > 2 &&
     (payload.rowEnd - payload.rowStart) > 2;
@@ -96,11 +98,27 @@ self.onmessage = (event: MessageEvent<WorkerTask>) => {
       const cRe = centerRe + (payload.flipX ? -1 : 1) * (x - payload.width / 2) * scaleRe;
       const cIm = centerIm + (payload.flipY ? -1 : 1) * (y - payload.height / 2) * scaleIm;
 
-      let zRe = 0,
+let zRe = 0,
         zIm = 0,
         iter = 0,
         escapeRadiusSquared = 0;
-      if (payload.geometricCulling && isInMainCardioidOrBulb(cRe, cIm)) {
+
+      if (payload.referenceOrbit) {
+        const orbit = payload.referenceOrbit;
+        const deltaRe = cRe - orbit.cRe;
+        const deltaIm = cIm - orbit.cIm;
+        const result = perturbationEscapeIterations(
+          orbit,
+          deltaRe,
+          deltaIm,
+          payload.maxIterations,
+          payload.geometricCulling,
+          payload.periodicityChecking
+        );
+        iter = result.iterations;
+        escapeRadiusSquared = result.escapeRadiusSquared;
+        steps += iter;
+      } else if (payload.geometricCulling && isInMainCardioidOrBulb(cRe, cIm)) {
         iter = payload.maxIterations;
         culledPixels += 1;
       } else {

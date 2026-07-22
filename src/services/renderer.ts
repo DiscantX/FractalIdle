@@ -20,6 +20,8 @@ import {
 } from './tile-cache';
 import { isAnimationPlaying } from './color-animation';
 import { computeTargetView } from './zoom-manager';
+import { computeReferenceOrbit } from '../core/strategies/mandelbrot';
+import type { ReferenceOrbit } from '../core/perturbation/types';
 
 // Default no-op lifecycle hooks. Other modules (UI, perf overlay) overwrite
 // these to be notified of render start / completion / cancellation. Defined with
@@ -83,6 +85,11 @@ type RenderLayer = {
   // this layer is, used to break down chunk throughput in the perf overlay.
   levelDir?: 'ahead' | 'behind';
   levelIndex?: number;
+  // Set when perturbationMode is 'on' for a supporting fractal type. Computed
+  // once per layer (not per tile) from that layer's own assembly center — see
+  // the "reference point = layer assembly center" convention discussed in the
+  // handoff. Absence means direct iteration for this layer.
+  referenceOrbit?: ReferenceOrbit;
 };
 
 // The render currently accepting tile results. Each render installs a fresh job
@@ -641,6 +648,10 @@ export function renderFrame(
   const solidGuessing = settingsEngine.getValue('solidGuessing') as boolean;
   const geometricCulling = settingsEngine.getValue('geometricCulling') as boolean;
   const periodicityChecking = settingsEngine.getValue('periodicityChecking') as boolean;
+  const perturbationMode = settingsEngine.getValue('perturbationMode') as 'off' | 'on';
+  // Restricted to Mandelbrot for now (Step 4 scope) — see mandelbrot.ts's
+  // perturbationEscapeIterations. Other strategies don't implement it yet.
+  const perturbationEnabled = perturbationMode === 'on' && fractalType === 'mandelbrot';
   const colorMode = settingsEngine.getValue('colorMode') as ColorMode;
   const smoothColoring = settingsEngine.getValue('smoothColoring') as boolean;
   const flipX = settingsEngine.getValue('flipX') as boolean;
@@ -688,7 +699,11 @@ export function renderFrame(
     range: { colStart: assembled.range.colStart, rowStart: assembled.range.rowStart },
     assembly: assembled.assembly,
     actx: assembled.assembly.getContext('2d'),
+    referenceOrbit: perturbationEnabled
+      ? computeReferenceOrbit(assembled.assemblyCenterRe, assembled.assemblyCenterIm, maxIterations)
+      : undefined,
   };
+
   if (primaryLayer.actx) primaryLayer.actx.imageSmoothingEnabled = false;
 
   // Combined queue: primary tiles first (focal-sorted so the interesting region
@@ -801,6 +816,9 @@ export function renderFrame(
         range: { colStart: lm.range.colStart, rowStart: lm.range.rowStart },
         levelDir: tag?.dir,
         levelIndex: tag?.level,
+        referenceOrbit: perturbationEnabled
+          ? computeReferenceOrbit(lm.assemblyCenterRe, lm.assemblyCenterIm, maxIterations)
+          : undefined,
       };
       for (const m of lm.misses) queue.push({ layer, ...m });
     }
@@ -880,6 +898,7 @@ export function renderFrame(
     solidGuessing,
     geometricCulling,
     periodicityChecking,
+    referenceOrbit: q.layer.referenceOrbit,
     interiorDetail: false,
     interiorNoiseMode: 'single',
     interiorNoiseStrength: 0,

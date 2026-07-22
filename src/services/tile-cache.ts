@@ -66,6 +66,7 @@ const COMPUTE_SIGNATURE_KEYS: string[] = [
   'solidGuessing',
   'geometricCulling',
   'periodicityChecking',
+  'perturbationMode',
   'colorMode',
   'smoothColoring',
   'flipX',

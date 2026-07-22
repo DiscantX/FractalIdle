@@ -5,6 +5,7 @@ import { renderAnimationControls } from '../ui/animation-controls';
 export const SECTIONS: SettingSectionDefinition[] = [
   { id: 'canvas', title: 'Canvas' },
   { id: 'fractal', title: 'Fractal' },
+  { id: 'perturbation', title: 'Perturbation' },
   { id: 'rendering', title: 'Rendering' },
   { id: 'cache', title: 'Tile cache' },
   { id: 'zoom', title: 'Zoom' },
@@ -56,6 +57,16 @@ export const coreSettings: SettingDefinition[] = [
     onChange: (_value, api) => {
       api.resetView();
     },
+  },
+
+  // --- Perturbation ---
+  {
+    id: 'perturbationMode', kind: 'select', label: 'Perturbation', section: 'perturbation',
+    default: 'off', rerender: true,
+    options: [
+      { value: 'off', label: 'Off (direct iteration)' },
+      { value: 'on', label: 'On (reference orbit + delta)' },
+    ],
   },
 
   // --- Rendering ---
