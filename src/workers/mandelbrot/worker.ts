@@ -113,7 +113,9 @@ let zRe = 0,
           deltaIm,
           payload.maxIterations,
           payload.geometricCulling,
-          payload.periodicityChecking
+          payload.periodicityChecking,
+          payload.seriesCoefficients,
+          payload.skipIteration,
         );
         iter = result.iterations;
         escapeRadiusSquared = result.escapeRadiusSquared;
