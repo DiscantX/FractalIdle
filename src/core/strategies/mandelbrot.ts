@@ -329,7 +329,9 @@ export function perturbationEscapeIterations(
   deltaIm: number,
   maxIterations: number,
   geometricCulling: boolean,
-  periodicityChecking: boolean
+  periodicityChecking: boolean,
+  seriesCoefficients?: SeriesCoefficients,
+  skipIteration?: number,
 ): { iterations: number; escapeRadiusSquared: number } {
   const pixelCre = orbit.cRe + deltaRe;
   const pixelCim = orbit.cIm + deltaIm;
@@ -338,19 +340,31 @@ export function perturbationEscapeIterations(
     return { iterations: maxIterations, escapeRadiusSquared: 0 };
   }
 
-  // δ_0 = 0 for every pixel — NOT deltaRe/deltaIm. Both the reference point
-  // and every pixel start their Mandelbrot orbit at z=0 regardless of c, so
-  // there is no initial offset between them. δc (deltaRe/deltaIm) only enters
-  // as the additive term inside the iteration formula below. Starting dRe/dIm
-  // at deltaRe/deltaIm instead of 0 is the single most common perturbation
-  // implementation bug — worth internalizing why it's wrong, not just avoiding it.
   let dRe = 0;
   let dIm = 0;
   let iter = 0;
-  const escapeRadiusSquared = 4;
 
-  let checkRe = 0;
-  let checkIm = 0;
+  // Skip-ahead seed: evaluate the order-2 approximation at skipIteration and
+  // start iterating from there instead of iteration 0. If the seeded point
+  // has ALREADY escaped (a legitimate outcome — series approximation only
+  // bounds truncation error, not whether the point escapes), report that
+  // directly rather than continuing a loop that would immediately exit.
+  if (seriesCoefficients && skipIteration && skipIteration > 0 && skipIteration < orbit.length - 1) {
+    const seeded = evaluateSeriesApproximation(seriesCoefficients, deltaRe, deltaIm, skipIteration);
+    dRe = seeded.deltaRe;
+    dIm = seeded.deltaIm;
+    iter = skipIteration;
+    const zRe0 = orbit.re[iter] + dRe;
+    const zIm0 = orbit.im[iter] + dIm;
+    const mag0 = zRe0 * zRe0 + zIm0 * zIm0;
+    if (mag0 >= 4) {
+      return { iterations: iter, escapeRadiusSquared: mag0 };
+    }
+  }
+
+  const escapeRadiusSquared = 4;
+  let checkRe = orbit.re[iter] + dRe;
+  let checkIm = orbit.im[iter] + dIm;
   let checkCounter = 0;
   let checkPeriod = 10;
 

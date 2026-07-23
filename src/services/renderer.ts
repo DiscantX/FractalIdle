@@ -20,8 +20,9 @@ import {
 } from './tile-cache';
 import { isAnimationPlaying } from './color-animation';
 import { computeTargetView } from './zoom-manager';
-import { computeReferenceOrbit } from '../core/strategies/mandelbrot';
-import type { ReferenceOrbit } from '../core/perturbation/types';
+import { computeReferenceOrbit, computeSeriesCoefficients, determineSkipIteration } from '../core/strategies/mandelbrot';
+import type { ReferenceOrbit, SeriesCoefficients } from '../core/perturbation/types';
+import type { SeriesToleranceMode } from '../core/strategies/mandelbrot';
 
 // Default no-op lifecycle hooks. Other modules (UI, perf overlay) overwrite
 // these to be notified of render start / completion / cancellation. Defined with
@@ -90,6 +91,8 @@ type RenderLayer = {
   // the "reference point = layer assembly center" convention discussed in the
   // handoff. Absence means direct iteration for this layer.
   referenceOrbit?: ReferenceOrbit;
+  seriesCoefficients?: SeriesCoefficients;
+  skipIteration?: number;
 };
 
 // The render currently accepting tile results. Each render installs a fresh job
@@ -631,6 +634,39 @@ function orderSpeculative(
   return ordered;
 }
 
+// Computes series-approximation setup for one layer, given its already-known
+// reference orbit. Returns undefined coefficients/skipIteration when series
+// approximation is off, or when seriesValidityMode is 'none' (always-trust
+// testing mode skips the error-bound walk entirely and just requests every
+// iteration as "safe" — see the seriesValidityMode==='none' branch below).
+function computeLayerSeriesSetup(
+  orbit: ReferenceOrbit,
+  assemblyWidth: number,
+  assemblyHeight: number,
+  scaleRe: number,
+  scaleIm: number,
+): { seriesCoefficients: SeriesCoefficients; skipIteration: number } {
+  const coeffs = computeSeriesCoefficients(orbit);
+  // Worst-case probe: the viewport corner farthest from the reference point
+  // (which sits at the layer's assembly center) — see determineSkipIteration's
+  // doc comment for why the corner is the right choice.
+  const probeDeltaRe = (assemblyWidth / 2) * scaleRe;
+  const probeDeltaIm = (assemblyHeight / 2) * scaleIm;
+
+  if (seriesValidityMode === 'none') {
+    // Testing-only: trust the approximation for every iteration the
+    // coefficients cover, with no error-bound check at all.
+    return { seriesCoefficients: coeffs, skipIteration: coeffs.length - 1 };
+  }
+  // 'heuristic' is deferred (see Step 10's conversation) — falls through to
+  // the same formal walk as 'formal' for now rather than silently doing
+  // nothing. Flag if this needs its own real implementation later.
+  const skipIteration = determineSkipIteration(
+    coeffs, probeDeltaRe, probeDeltaIm, seriesToleranceMode, seriesTolerance
+  );
+  return { seriesCoefficients: coeffs, skipIteration };
+}
+
 export function renderFrame(
   renderId: number,
   focalX?: number,
@@ -652,6 +688,11 @@ export function renderFrame(
   // Restricted to Mandelbrot for now (Step 4 scope) — see mandelbrot.ts's
   // perturbationEscapeIterations. Other strategies don't implement it yet.
   const perturbationEnabled = perturbationMode === 'on' && fractalType === 'mandelbrot';
+  const seriesApproximation = settingsEngine.getValue('seriesApproximation') as boolean;
+  const seriesEnabled = perturbationEnabled && seriesApproximation;
+  const seriesValidityMode = settingsEngine.getValue('seriesValidityMode') as 'formal' | 'heuristic' | 'none';
+  const seriesToleranceMode = settingsEngine.getValue('seriesToleranceMode') as SeriesToleranceMode;
+  const seriesTolerance = settingsEngine.getValue('seriesTolerance') as number;
   const colorMode = settingsEngine.getValue('colorMode') as ColorMode;
   const smoothColoring = settingsEngine.getValue('smoothColoring') as boolean;
   const flipX = settingsEngine.getValue('flipX') as boolean;
@@ -684,7 +725,15 @@ export function renderFrame(
   // paints to screen. Subsequent layers are look-ahead / look-behind prerender
   // targets — they only populate the cache (no assembly, no paint), using spare
   // worker capacity.
-  const assembled = assembleFromCache(renderView, width, height, true);
+const assembled = assembleFromCache(renderView, width, height, true);
+
+  const primaryOrbit = perturbationEnabled
+    ? computeReferenceOrbit(assembled.assemblyCenterRe, assembled.assemblyCenterIm, maxIterations)
+    : undefined;
+  const primarySeries = (seriesEnabled && primaryOrbit)
+    ? computeLayerSeriesSetup(primaryOrbit, assembled.assemblyWidth, assembled.assemblyHeight, assembled.scaleRe, assembled.scaleIm)
+    : undefined;
+
   const primaryLayer: RenderLayer = {
     primary: true,
     zoom: renderView.zoom,
@@ -699,9 +748,9 @@ export function renderFrame(
     range: { colStart: assembled.range.colStart, rowStart: assembled.range.rowStart },
     assembly: assembled.assembly,
     actx: assembled.assembly.getContext('2d'),
-    referenceOrbit: perturbationEnabled
-      ? computeReferenceOrbit(assembled.assemblyCenterRe, assembled.assemblyCenterIm, maxIterations)
-      : undefined,
+    referenceOrbit: primaryOrbit,
+    seriesCoefficients: primarySeries?.seriesCoefficients,
+    skipIteration: primarySeries?.skipIteration,
   };
 
   if (primaryLayer.actx) primaryLayer.actx.imageSmoothingEnabled = false;

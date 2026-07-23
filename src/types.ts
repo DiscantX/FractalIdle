@@ -1,4 +1,4 @@
-import type { ReferenceOrbit } from './core/perturbation/types';
+import type { ReferenceOrbit, SeriesCoefficients } from './core/perturbation/types';
 
 export type ViewState = {
   centerRe: number;
@@ -101,6 +101,12 @@ export type WorkerTask = {
   // that layer. Its absence is how the worker decides direct vs. perturbation
   // iteration; there's no separate boolean.
   referenceOrbit?: ReferenceOrbit;
+  // Present only when seriesApproximation is also on. skipIteration is the
+  // shared, per-layer "safe to skip to" iteration from determineSkipIteration
+  // — 0 means no safe skip was found (falls through to normal perturbation,
+  // same as series approximation being off for this layer).
+  seriesCoefficients?: SeriesCoefficients;
+  skipIteration?: number;
   interiorDetail: boolean;
   interiorNoiseMode: 'single' | 'fractal';
   interiorNoiseStrength: number;

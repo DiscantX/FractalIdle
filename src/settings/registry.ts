@@ -70,10 +70,16 @@ export const coreSettings: SettingDefinition[] = [
     ],
   },
 
+{
+    id: 'seriesApproximation', kind: 'checkbox', label: 'Series approximation', section: 'perturbation',
+    default: false, rerender: true,
+    visibleWhen: (s) => s.perturbationMode === 'on',
+  },
+
   {
   id: 'seriesValidityMode', kind: 'select', label: 'Series approx. validity check', section: 'perturbation',
   default: 'formal', rerender: true,
-  visibleWhen: (s) => s.perturbationMode === 'on', // wired once seriesApproximation exists alongside this
+  visibleWhen: (s) => s.perturbationMode === 'on' && s.seriesApproximation === true && s.seriesValidityMode === 'formal',
   options: [
     { value: 'formal', label: 'Formal error bound (recommended)' },
     { value: 'heuristic', label: 'Periodic recheck (cheaper to compute, less rigorous)' },
@@ -84,7 +90,7 @@ export const coreSettings: SettingDefinition[] = [
 {
     id: 'seriesToleranceMode', kind: 'select', label: 'Series tolerance basis', section: 'perturbation',
     default: 'escape-fraction', rerender: true,
-    visibleWhen: (s) => s.perturbationMode === 'on' && s.seriesValidityMode === 'formal',
+    visibleWhen: (s) => s.perturbationMode === 'on' && s.seriesApproximation === true && s.seriesValidityMode === 'formal',
     options: [
       { value: 'escape-fraction', label: 'Fraction of escape radius' },
       { value: 'delta-fraction', label: 'Fraction of current |delta|' },
@@ -94,7 +100,7 @@ export const coreSettings: SettingDefinition[] = [
   {
     id: 'seriesTolerance', kind: 'slider', label: 'Series tolerance value', section: 'perturbation',
     default: 0.01, min: 0.0001, max: 1, step: 0.0001, rerender: true,
-    visibleWhen: (s) => s.perturbationMode === 'on' && s.seriesValidityMode === 'formal',
+    visibleWhen: (s) => s.perturbationMode === 'on' && s.seriesApproximation === true && s.seriesValidityMode === 'formal',
     format: (v) => v.toExponential(2),
   },
 
