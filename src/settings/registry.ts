@@ -70,9 +70,9 @@ export const coreSettings: SettingDefinition[] = [
   },
 
   // --- Rendering ---
-  { id: 'maxIterations', kind: 'slider', label: 'Max iterations', section: 'rendering', default: 256, min: 32, max: 2000, step: 8, rerender: true },
-  { id: 'gridColumns', kind: 'slider', label: 'Grid columns', section: 'rendering', default: 4, min: 1, max: 8, step: 1, rerender: true },
-  { id: 'gridRows', kind: 'slider', label: 'Grid rows', section: 'rendering', default: 4, min: 1, max: 8, step: 1, rerender: true },
+  { id: 'maxIterations', kind: 'slider', label: 'Max iterations', section: 'rendering', default: 256, min: 32, max: 10000, step: 8, rerender: true },
+  { id: 'gridColumns', kind: 'slider', label: 'Grid columns', section: 'rendering', default: 8, min: 1, max: 64, step: 1, rerender: true },
+  { id: 'gridRows', kind: 'slider', label: 'Grid rows', section: 'rendering', default: 8, min: 1, max: 64, step: 1, rerender: true },
   { id: 'workerCount', kind: 'slider', label: 'Worker count', section: 'rendering', default: 4, min: 1, max: 8, step: 1, rerender: true },
   {
     id: 'tileCacheSize', kind: 'number', label: 'Max cached tiles', section: 'cache',
