@@ -260,6 +260,56 @@ export function estimateSeriesError(
   return Math.sqrt(termC_re * termC_re + termC_im * termC_im);
 }
 
+export type SeriesToleranceMode = 'escape-fraction' | 'delta-fraction' | 'absolute';
+
+/**
+ * Decides how many iterations a layer can safely skip via series
+ * approximation, by checking the formal error bound (estimateSeriesError)
+ * against a single worst-case probe point — the viewport corner farthest
+ * from the reference point, per the standard deep-zoom-renderer technique
+ * (the corner has the largest deltaC in the layer, so if the approximation
+ * is still valid there, it's valid everywhere closer to the reference).
+ *
+ * Walks forward from iteration 1 until the error bound exceeds tolerance,
+ * then returns the last iteration still inside it. Returns 0 if even the
+ * first iteration fails the check (no safe skip available — every pixel
+ * falls through to full iteration, same as series approximation being off).
+ */
+export function determineSkipIteration(
+  coeffs: SeriesCoefficients,
+  probeDeltaRe: number,
+  probeDeltaIm: number,
+  toleranceMode: SeriesToleranceMode,
+  toleranceValue: number
+): number {
+  const escapeRadius = 2; // sqrt(4) — same escape threshold used throughout
+  let safeIteration = 0;
+
+  for (let n = 1; n < coeffs.length; n++) {
+    const error = estimateSeriesError(coeffs, probeDeltaRe, probeDeltaIm, n);
+
+    let threshold: number;
+    if (toleranceMode === 'escape-fraction') {
+      threshold = toleranceValue * escapeRadius;
+    } else if (toleranceMode === 'delta-fraction') {
+      // Current delta magnitude AT the probe point, per the order-2
+      // approximation itself — using the approximation's own prediction as
+      // the yardstick for its own error is standard practice here (we don't
+      // have a "true" delta to compare against without doing the expensive
+      // work series approximation exists to avoid).
+      const { deltaRe, deltaIm } = evaluateSeriesApproximation(coeffs, probeDeltaRe, probeDeltaIm, n);
+      threshold = toleranceValue * Math.sqrt(deltaRe * deltaRe + deltaIm * deltaIm);
+    } else {
+      threshold = toleranceValue;
+    }
+
+    if (error > threshold) break;
+    safeIteration = n;
+  }
+
+  return safeIteration;
+}
+
 /**
  * Per-pixel delta iteration against a precomputed reference orbit.
  * geometricCulling / periodicityChecking mirror escapeIterations's contract,

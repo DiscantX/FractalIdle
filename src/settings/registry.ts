@@ -81,6 +81,23 @@ export const coreSettings: SettingDefinition[] = [
   ],
 },
 
+{
+    id: 'seriesToleranceMode', kind: 'select', label: 'Series tolerance basis', section: 'perturbation',
+    default: 'escape-fraction', rerender: true,
+    visibleWhen: (s) => s.perturbationMode === 'on' && s.seriesValidityMode === 'formal',
+    options: [
+      { value: 'escape-fraction', label: 'Fraction of escape radius' },
+      { value: 'delta-fraction', label: 'Fraction of current |delta|' },
+      { value: 'absolute', label: 'Absolute epsilon' },
+    ],
+  },
+  {
+    id: 'seriesTolerance', kind: 'slider', label: 'Series tolerance value', section: 'perturbation',
+    default: 0.01, min: 0.0001, max: 1, step: 0.0001, rerender: true,
+    visibleWhen: (s) => s.perturbationMode === 'on' && s.seriesValidityMode === 'formal',
+    format: (v) => v.toExponential(2),
+  },
+
   // --- Precision ---
   // Governs how the reference orbit's arithmetic is done once perturbation
   // is on (perturbationMode === 'on'). 'auto' tiers by required digit count
