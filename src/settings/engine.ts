@@ -54,17 +54,80 @@ export class SettingsEngine {
       const sectionEl = document.createElement('section');
       sectionEl.className = 'control-section';
 
-      const heading = document.createElement('h2');
+      // Section header: clickable toggle for collapse/expand
+      const header = document.createElement('div');
+      header.className = 'section-header';
+      header.setAttribute('role', 'button');
+      header.setAttribute('tabindex', '0');
+      header.setAttribute('aria-expanded', 'true');
+      header.setAttribute('aria-controls', `section-body-${section.id}`);
+
+      const chevron = document.createElement('span');
+      chevron.className = 'section-chevron';
+      chevron.setAttribute('aria-hidden', 'true');
+      chevron.textContent = '▸';
+      header.appendChild(chevron);
+
+      const heading = document.createElement('span');
+      heading.className = 'section-title';
       heading.textContent = section.title;
-      sectionEl.appendChild(heading);
+      header.appendChild(heading);
+
+      // Click to toggle collapsed state
+      const toggleCollapsed = () => {
+        const collapsed = sectionEl.classList.toggle('is-collapsed');
+        header.setAttribute('aria-expanded', String(!collapsed));
+        chevron.style.transform = collapsed ? 'rotate(0deg)' : 'rotate(90deg)';
+        try {
+          localStorage.setItem(`settings-section-${section.id}-collapsed`, String(collapsed));
+        } catch {
+          /* ignore storage errors */
+        }
+      };
+      header.addEventListener('click', toggleCollapsed);
+      header.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          toggleCollapsed();
+        }
+      });
+
+      sectionEl.appendChild(header);
+
+      // Collapsible body wrapping the settings fields
+      const body = document.createElement('div');
+      body.className = 'section-body';
+      body.id = `section-body-${section.id}`;
+
+      const bodyInner = document.createElement('div');
+      bodyInner.className = 'section-body-inner';
 
       for (const setting of sectionSettings) {
-        sectionEl.appendChild(this.buildField(setting));
+        bodyInner.appendChild(this.buildField(setting));
       }
+      body.appendChild(bodyInner);
+      sectionEl.appendChild(body);
+
       container.appendChild(sectionEl);
-    }
+
+      // Restore persisted collapsed state
+      // 1. Determine final collapsed state: 
+      //    Use the saved localStorage state if it exists. 
+      //    Otherwise, fall back to the section's defaultCollapsed rule.
+      const savedCollapsed = localStorage.getItem(`settings-section-${section.id}-collapsed`);
+      const shouldCollapse = savedCollapsed !== null 
+        ? savedCollapsed === 'true' 
+        : !!(section as any).defaultCollapsed; // casted to pass strict compilation before types.ts is modified
+
+      // 2. Apply classes and styles matching the calculated rule
+      if (shouldCollapse) {
+        sectionEl.classList.add('is-collapsed');
+        header.setAttribute('aria-expanded', 'false');
+        chevron.style.transform = 'rotate(0deg)';
+      }
     this.refreshVisibility();
   }
+}
 
   private buildField(setting: SettingDefinition): HTMLElement {
     // Custom controls render their own DOM and manage their own side effects;

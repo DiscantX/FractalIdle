@@ -86,4 +86,5 @@ export type SettingDefinition = ValueSettingDefinition | CustomSetting;
 export interface SettingSectionDefinition {
     id: string;
     title: string;
+    defaultCollapsed?: boolean;
 }

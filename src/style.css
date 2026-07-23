@@ -275,22 +275,123 @@ label span {
   border-top: 1px solid rgba(255, 255, 255, 0.08);
 }
 
-.control-section h2 {
-  margin: 0 0 0.75rem;
+/* Section header: clickable area for collapse/expand */
+.section-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+  padding: 0.25rem 0;
+  margin: 0 0 0.5rem;
   font-size: 1rem;
+  font-weight: 600;
+  color: #cbd5e1;
+  transition: color 0.15s ease;
+}
+
+.section-header:hover {
+  color: #f8fafc;
+}
+
+.section-header:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+  border-radius: 0.25rem;
+}
+
+.section-chevron {
+  display: inline-block;
+  font-size: 0.75rem;
+  color: #94a3b8;
+  transition: transform 0.2s ease;
+  /* Expanded: points down (▾) */
+  transform: rotate(90deg);
+}
+
+.section-header.is-collapsed .section-chevron {
+  transform: rotate(0deg); /* collapsed: points right (▸) */
+}
+
+.section-title {
+  flex: 1;
+}
+
+/* Collapsible body: smooth height transition via grid-template-rows */
+.section-body {
+  display: grid;
+  grid-template-rows: 1fr;
+  transition: grid-template-rows 0.2s ease;
+  min-height: 0;
+}
+
+.control-section.is-collapsed .section-body {
+  grid-template-rows: 0fr;
+}
+
+.section-body-inner {
+  overflow: hidden;
+  min-height: 0;
+  min-width: 0;
+}
+
+.control-section h2 {
+  margin: 0;
 }
 
 .control-field {
-  margin-bottom: 0.75rem;
-}
-
-.inline-field {
-  flex-direction: row;
-  align-items: center;
+  display: flex;
+  flex-direction: row;     /* Align label text and input side-by-side */
+  align-items: center;     /* Vertically center text with the input element */
   justify-content: space-between;
-  gap: 0.75rem;
+  gap: .1rem;
+  margin-bottom: 0.75rem;  /* Keeps your existing margin spacing */
 }
 
+/* Sets a fixed, uniform width for the label text column */
+.control-field > span {
+  flex: 0 0 100px;         
+  width: 100px;
+  min-width: 100px;
+  font-size: 0.95rem;      
+  color: #cbd5e1;
+  white-space: nowrap;     /* Prevents text from wrapping to a second line */
+  overflow: hidden;
+  text-overflow: ellipsis; /* Puts a '...' if a title accidentally overflows */
+}
+
+/* Forces inputs, select dropdowns, and slider rows to fill the remaining uniform width */
+.control-field > input,
+.control-field > select,
+.control-field .value-row {
+  flex: 1 .85 auto;
+  min-width: 0;            /* Prevents flexible components from breaking container bounds */
+}
+
+/* Force the row direction over the base label column rule */
+label.control-field,
+label.inline-field {
+  flex-direction: row !important; /* Overrides display: flex; flex-direction: column; */
+  width: 100%;                   /* Ensure the label element spans the full width of the panel */
+}
+
+/* Allow checkbox labels to expand and occupy more horizontal space */
+.inline-field > span {
+  flex: 1 1 auto;          /* Let it grow to fill the row */
+  width: auto;             /* Override the hardcoded width */
+  min-width: 0;            /* Allow proper shrinking behavior if needed */
+  padding-right: 0.5rem;   /* Safe distance so text doesn't slam into the checkbox */
+  
+  /* Keep these to handle text that is still genuinely too long for the entire bar */
+  white-space: nowrap;     
+  overflow: hidden;
+  text-overflow: ellipsis; 
+}
+
+/* Ensure the checkbox itself stays small and pinned to the right */
+.inline-field input[type="checkbox"] {
+  flex: 0 0 auto;          /* Prevent the checkbox from stretching */
+  margin-left: auto;       /* Keep pushing it to the very right edge */
+}
 .value-row {
   display: flex;
   align-items: center;
@@ -298,17 +399,45 @@ label span {
   width: 100%;
 }
 
+/* Update the main container to stack the buttons row and the scrubber row vertically */
+.control-section .anim-controls {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  gap: 0.5rem;            /* Spacing between the buttons row and the scrubber row */
+}
+
+/* 1. BUTTONS ROW: Keep them side-by-side and full width if desired */
+.control-field.anim-buttons {
+  display: flex;
+  flex-direction: row;
+  width: 100%;
+  gap: 0.5rem;
+  justify-content: flex-start; /* Aligns buttons to the left; change to space-between if they should spread out */
+  align-items: center;
+}
+
+.anim-buttons button {
+  flex: 0 0 auto;        /* Prevent buttons from expanding weirdly */
+}
+
+/* 2. SCRUBBER ROW: Force the slider to take up its own full line */
+.anim-controls input[type="range"] {
+  display: block;
+  width: 100%;           /* Stretch edge-to-edge across the sidebar */
+  flex: 1 1 auto;
+  min-width: 0;
+  margin-top: 0.25rem;   /* Tiny extra breathing room below the buttons */
+}
+
 .value-row input[type="range"] {
   flex: 1 1 auto;
-  width: auto;
-  min-width: 0;
 }
 
 .value-input {
-  flex: 0 0 72px;
-  width: 72px;
-  max-width: 72px;
-  min-width: 72px;
+  flex: 0 0 60px;
+  width: 60px;
+  min-width: 60px;
 }
 
 input[type="number"],
