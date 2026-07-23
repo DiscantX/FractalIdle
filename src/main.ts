@@ -92,21 +92,21 @@ function init() {
   warmPool();
 // // --- SCRATCH: bigint-fixed sanity check, remove after verifying ---
 
-  {
-    console.log('auto @ 10 digits (expect null):', selectPrecisionBackend(10, 'auto'));
-    console.log('auto @ 20 digits (expect double-double instance):', selectPrecisionBackend(20, 'auto'));
-    console.log('auto @ 50 digits (expect decimal.js instance):', selectPrecisionBackend(50, 'auto'));
-    console.log('forced bigint-fixed @ 10 digits (expect bigint-fixed anyway):', selectPrecisionBackend(10, 'bigint-fixed'));
-  }
+  // {
+  //   console.log('auto @ 10 digits (expect null):', selectPrecisionBackend(10, 'auto'));
+  //   console.log('auto @ 20 digits (expect double-double instance):', selectPrecisionBackend(20, 'auto'));
+  //   console.log('auto @ 50 digits (expect decimal.js instance):', selectPrecisionBackend(50, 'auto'));
+  //   console.log('forced bigint-fixed @ 10 digits (expect bigint-fixed anyway):', selectPrecisionBackend(10, 'bigint-fixed'));
+  // }
 
-  {
-    console.log('digitsForZoom(1, 1280):', digitsForZoom(1, 1280));       // small — should land in float64 tier
-    console.log('digitsForZoom(1e16, 1280):', digitsForZoom(1e16, 1280)); // just past float64's real wall
-    console.log('digitsForZoom(1e50, 1280):', digitsForZoom(1e50, 1280)); // deep — should land in decimal.js tier
-    console.log('digitsForZoom(1e100, 1280):', digitsForZoom(1e100, 1280)); // deep — should land in decimal.js tier
-    console.log('digitsForZoom(1e200, 1280):', digitsForZoom(1e350, 1280)); // deep — should land in decimal.js tier
+  // {
+  //   console.log('digitsForZoom(1, 1280):', digitsForZoom(1, 1280));       // small — should land in float64 tier
+  //   console.log('digitsForZoom(1e16, 1280):', digitsForZoom(1e16, 1280)); // just past float64's real wall
+  //   console.log('digitsForZoom(1e50, 1280):', digitsForZoom(1e50, 1280)); // deep — should land in decimal.js tier
+  //   console.log('digitsForZoom(1e100, 1280):', digitsForZoom(1e100, 1280)); // deep — should land in decimal.js tier
+  //   console.log('digitsForZoom(1e200, 1280):', digitsForZoom(1e350, 1280)); // deep — should land in decimal.js tier
 
-  }
+  // }
 
 //   {
 //     const backend = bigIntFixedBackend(20); // 20 digits — arbitrary for this check

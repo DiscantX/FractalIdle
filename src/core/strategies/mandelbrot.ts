@@ -1,4 +1,4 @@
-import type { ReferenceOrbit } from '../perturbation/types';
+import type { ReferenceOrbit, SeriesCoefficients } from '../perturbation/types';
 
 // Core Mandelbrot strategy – pure mathematical helpers that can be shared
 // with other fractal implementations (Julia, Burning Ship, Buffalo, …).
@@ -137,6 +137,65 @@ export function computeReferenceOrbit(
     length: iter + 1,
     escaped: iter < maxIterations,
   };
+}
+
+/**
+ * Computes series-approximation coefficients A_n, B_n (order-2 approximation
+ * of delta as a power series in deltaC), plus C_n (the next, untrusted term —
+ * kept only as a formal truncation-error estimate). Derived by substituting
+ * delta_n = A_n*deltaC + B_n*deltaC^2 + C_n*deltaC^3 + ... into the
+ * perturbation recurrence delta_{n+1} = 2*Z_n*delta_n + delta_n^2 + deltaC
+ * and matching same-power terms:
+ *
+ *   A_{n+1} = 2*Z_n*A_n + 1
+ *   B_{n+1} = 2*Z_n*B_n + A_n^2
+ *   C_{n+1} = 2*Z_n*C_n + 2*A_n*B_n
+ *
+ * All complex; all start at 0 (mirrors delta_0 = 0 for every pixel — see
+ * perturbationEscapeIterations). Runs once per layer, alongside
+ * computeReferenceOrbit — same per-layer-not-per-pixel cost profile.
+ */
+export function computeSeriesCoefficients(orbit: ReferenceOrbit): SeriesCoefficients {
+  const n = orbit.length;
+  const aRe = new Float64Array(n);
+  const aIm = new Float64Array(n);
+  const bRe = new Float64Array(n);
+  const bIm = new Float64Array(n);
+  const cRe = new Float64Array(n);
+  const cIm = new Float64Array(n);
+
+  // Index 0 is already correctly all-zero (Float64Array default-initializes).
+  for (let i = 0; i < n - 1; i++) {
+    const zRe = orbit.re[i];
+    const zIm = orbit.im[i];
+    const aRe_i = aRe[i], aIm_i = aIm[i];
+    const bRe_i = bRe[i], bIm_i = bIm[i];
+    const cRe_i = cRe[i], cIm_i = cIm[i];
+
+    // 2*Z_n*A_n (complex multiply, doubled)
+    const twoZA_re = 2 * (zRe * aRe_i - zIm * aIm_i);
+    const twoZA_im = 2 * (zRe * aIm_i + zIm * aRe_i);
+    aRe[i + 1] = twoZA_re + 1; // the "+1" is deltaC's own coefficient — real-valued
+    aIm[i + 1] = twoZA_im;
+
+    // 2*Z_n*B_n + A_n^2
+    const twoZB_re = 2 * (zRe * bRe_i - zIm * bIm_i);
+    const twoZB_im = 2 * (zRe * bIm_i + zIm * bRe_i);
+    const aSq_re = aRe_i * aRe_i - aIm_i * aIm_i;
+    const aSq_im = 2 * aRe_i * aIm_i;
+    bRe[i + 1] = twoZB_re + aSq_re;
+    bIm[i + 1] = twoZB_im + aSq_im;
+
+    // 2*Z_n*C_n + 2*A_n*B_n
+    const twoZC_re = 2 * (zRe * cRe_i - zIm * cIm_i);
+    const twoZC_im = 2 * (zRe * cIm_i + zIm * cRe_i);
+    const twoAB_re = 2 * (aRe_i * bRe_i - aIm_i * bIm_i);
+    const twoAB_im = 2 * (aRe_i * bIm_i + aIm_i * bRe_i);
+    cRe[i + 1] = twoZC_re + twoAB_re;
+    cIm[i + 1] = twoZC_im + twoAB_im;
+  }
+
+  return { aRe, aIm, bRe, bIm, cRe, cIm, length: n };
 }
 
 /**

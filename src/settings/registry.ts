@@ -70,6 +70,17 @@ export const coreSettings: SettingDefinition[] = [
     ],
   },
 
+  {
+  id: 'seriesValidityMode', kind: 'select', label: 'Series approx. validity check', section: 'perturbation',
+  default: 'formal', rerender: true,
+  visibleWhen: (s) => s.perturbationMode === 'on', // wired once seriesApproximation exists alongside this
+  options: [
+    { value: 'formal', label: 'Formal error bound (recommended)' },
+    { value: 'heuristic', label: 'Periodic recheck (cheaper to compute, less rigorous)' },
+    { value: 'none', label: 'Always trust (unsafe — testing only)' },
+  ],
+},
+
   // --- Precision ---
   // Governs how the reference orbit's arithmetic is done once perturbation
   // is on (perturbationMode === 'on'). 'auto' tiers by required digit count

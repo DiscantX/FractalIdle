@@ -14,6 +14,26 @@ export type ReferenceOrbit = {
   escaped: boolean;
 };
 
+/**
+ * Series-approximation coefficients for a reference orbit, computed once per
+ * layer alongside the orbit itself (see computeSeriesCoefficients in
+ * mandelbrot.ts). A/B are the order-2 approximation terms; C is one order
+ * further than we trust for the approximation itself, kept purely as a
+ * formal error estimate — see the derivation notes in mandelbrot.ts.
+ *
+ * Each coefficient is complex (Z_n is complex, so are A_n/B_n/C_n), hence
+ * paired re/im arrays, mirroring ReferenceOrbit's own re/im shape.
+ */
+export type SeriesCoefficients = {
+  aRe: Float64Array;
+  aIm: Float64Array;
+  bRe: Float64Array;
+  bIm: Float64Array;
+  cRe: Float64Array;
+  cIm: Float64Array;
+  length: number;
+};
+
 // A pixel's offset from the reference point, in world coordinates — always
 // float64. This is the ONE place a precision backend hands off to the
 // (always-float64) delta iteration below: float64 backend subtracts directly;
