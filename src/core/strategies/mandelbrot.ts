@@ -199,6 +199,68 @@ export function computeSeriesCoefficients(orbit: ReferenceOrbit): SeriesCoeffici
 }
 
 /**
+ * Evaluates the order-2 series approximation (A_n*deltaC + B_n*deltaC^2) at
+ * a specific iteration n, for a specific pixel's deltaC. This is the
+ * skip-ahead: instead of iterating delta from n=0, a pixel can start here.
+ */
+export function evaluateSeriesApproximation(
+  coeffs: SeriesCoefficients,
+  deltaRe: number,
+  deltaIm: number,
+  n: number
+): { deltaRe: number; deltaIm: number } {
+  const aRe = coeffs.aRe[n], aIm = coeffs.aIm[n];
+  const bRe = coeffs.bRe[n], bIm = coeffs.bIm[n];
+
+  // A_n * deltaC (complex multiply)
+  const termA_re = aRe * deltaRe - aIm * deltaIm;
+  const termA_im = aRe * deltaIm + aIm * deltaRe;
+
+  // deltaC^2, then B_n * deltaC^2
+  const deltaCSq_re = deltaRe * deltaRe - deltaIm * deltaIm;
+  const deltaCSq_im = 2 * deltaRe * deltaIm;
+  const termB_re = bRe * deltaCSq_re - bIm * deltaCSq_im;
+  const termB_im = bRe * deltaCSq_im + bIm * deltaCSq_re;
+
+  return {
+    deltaRe: termA_re + termB_re,
+    deltaIm: termA_im + termB_im,
+  };
+}
+
+/**
+ * Formal error bound: the magnitude of the first UNTRUSTED term (C_n *
+ * deltaC^3) — a worst-case estimate of how much the order-2 truncation could
+ * be wrong by at iteration n, for this pixel's deltaC. This is a standard,
+ * conservative bound (the true error is the sum of ALL higher-order terms,
+ * but for a well-behaved, converging series each successive term is smaller
+ * than the last, so the first dropped term dominates the estimate).
+ *
+ * Does not itself decide validity — callers compare this against a
+ * tolerance (see determineSkipIteration in the next step).
+ */
+export function estimateSeriesError(
+  coeffs: SeriesCoefficients,
+  deltaRe: number,
+  deltaIm: number,
+  n: number
+): number {
+  const cRe = coeffs.cRe[n], cIm = coeffs.cIm[n];
+
+  // deltaC^3 = deltaC^2 * deltaC
+  const deltaCSq_re = deltaRe * deltaRe - deltaIm * deltaIm;
+  const deltaCSq_im = 2 * deltaRe * deltaIm;
+  const deltaCCube_re = deltaCSq_re * deltaRe - deltaCSq_im * deltaIm;
+  const deltaCCube_im = deltaCSq_re * deltaIm + deltaCSq_im * deltaRe;
+
+  // C_n * deltaC^3 (complex multiply), then its magnitude.
+  const termC_re = cRe * deltaCCube_re - cIm * deltaCCube_im;
+  const termC_im = cRe * deltaCCube_im + cIm * deltaCCube_re;
+
+  return Math.sqrt(termC_re * termC_re + termC_im * termC_im);
+}
+
+/**
  * Per-pixel delta iteration against a precomputed reference orbit.
  * geometricCulling / periodicityChecking mirror escapeIterations's contract,
  * applied to the pixel's actual reconstructed z/c — see notes below.
