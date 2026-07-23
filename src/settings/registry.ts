@@ -6,6 +6,7 @@ export const SECTIONS: SettingSectionDefinition[] = [
   { id: 'canvas', title: 'Canvas' },
   { id: 'fractal', title: 'Fractal' },
   { id: 'perturbation', title: 'Perturbation' },
+  { id: 'precision', title: 'Precision' },
   { id: 'rendering', title: 'Rendering' },
   { id: 'cache', title: 'Tile cache' },
   { id: 'zoom', title: 'Zoom' },
@@ -66,6 +67,27 @@ export const coreSettings: SettingDefinition[] = [
     options: [
       { value: 'off', label: 'Off (direct iteration)' },
       { value: 'on', label: 'On (reference orbit + delta)' },
+    ],
+  },
+
+  // --- Precision ---
+  // Governs how the reference orbit's arithmetic is done once perturbation
+  // is on (perturbationMode === 'on'). 'auto' tiers by required digit count
+  // (float64 <=15, double-double 16-28, decimal.js 29+) — see
+  // perturbation-precision benchmarking notes. The three forced options run
+  // that backend at EVERY digit count regardless of whether it's favorable
+  // there — useful for direct comparison/testing, not intended for real use
+  // (e.g. forced bigint-fixed will hit its known ~500-digit cliff; forced
+  // double-double silently caps at its ~30-digit ceiling past that point).
+  {
+    id: 'precisionMode', kind: 'select', label: 'Precision backend', section: 'precision',
+    default: 'auto', rerender: true,
+    visibleWhen: (s) => s.perturbationMode === 'on',
+    options: [
+      { value: 'auto', label: 'Auto (float64 / double-double / decimal.js by depth)' },
+      { value: 'double-double', label: 'Double-double (forced, all depths)' },
+      { value: 'decimal-js', label: 'Decimal.js (forced, all depths)' },
+      { value: 'bigint-fixed', label: 'BigInt fixed-point (forced, all depths)' },
     ],
   },
 
