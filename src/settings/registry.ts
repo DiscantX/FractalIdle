@@ -63,7 +63,7 @@ export const coreSettings: SettingDefinition[] = [
   // --- Perturbation ---
   {
     id: 'perturbationMode', kind: 'select', label: 'Perturbation', section: 'perturbation',
-    default: 'off', rerender: true,
+    default: 'on', rerender: true,
     options: [
       { value: 'off', label: 'Off (direct iteration)' },
       { value: 'on', label: 'On (reference orbit + delta)' },
@@ -72,14 +72,14 @@ export const coreSettings: SettingDefinition[] = [
 
 {
     id: 'seriesApproximation', kind: 'checkbox', label: 'Series approximation', section: 'perturbation',
-    default: false, rerender: true,
+    default: true, rerender: true,
     visibleWhen: (s) => s.perturbationMode === 'on',
   },
 
   {
   id: 'seriesValidityMode', kind: 'select', label: 'Series approx. validity check', section: 'perturbation',
   default: 'formal', rerender: true,
-  visibleWhen: (s) => s.perturbationMode === 'on' && s.seriesApproximation === true && s.seriesValidityMode === 'formal',
+  visibleWhen: (s) => s.perturbationMode === 'on' && s.seriesApproximation === true, 
   options: [
     { value: 'formal', label: 'Formal error bound (recommended)' },
     { value: 'heuristic', label: 'Periodic recheck (cheaper to compute, less rigorous)' },

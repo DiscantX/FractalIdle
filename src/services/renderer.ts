@@ -645,6 +645,9 @@ function computeLayerSeriesSetup(
   assemblyHeight: number,
   scaleRe: number,
   scaleIm: number,
+  seriesValidityMode: 'formal' | 'heuristic' | 'none',
+  seriesToleranceMode: SeriesToleranceMode,
+  seriesTolerance: number,
 ): { seriesCoefficients: SeriesCoefficients; skipIteration: number } {
   const coeffs = computeSeriesCoefficients(orbit);
   // Worst-case probe: the viewport corner farthest from the reference point
@@ -731,7 +734,7 @@ const assembled = assembleFromCache(renderView, width, height, true);
     ? computeReferenceOrbit(assembled.assemblyCenterRe, assembled.assemblyCenterIm, maxIterations)
     : undefined;
   const primarySeries = (seriesEnabled && primaryOrbit)
-    ? computeLayerSeriesSetup(primaryOrbit, assembled.assemblyWidth, assembled.assemblyHeight, assembled.scaleRe, assembled.scaleIm)
+    ? computeLayerSeriesSetup(primaryOrbit, assembled.assemblyWidth, assembled.assemblyHeight, assembled.scaleRe, assembled.scaleIm, seriesValidityMode, seriesToleranceMode, seriesTolerance)
     : undefined;
 
   const primaryLayer: RenderLayer = {
@@ -848,9 +851,16 @@ const assembled = assembleFromCache(renderView, width, height, true);
     const levelTags = new Map<ViewState, { dir: 'ahead' | 'behind'; level: number }>();
     for (let n = 0; n < ahead.length; n += 1) levelTags.set(ahead[n], { dir: 'ahead', level: n });
     for (let n = 0; n < behind.length; n += 1) levelTags.set(behind[n], { dir: 'behind', level: n });
-    for (const v of ordered) {
+    
+ for (const v of ordered) {
       const tag = levelTags.get(v);
       const lm = collectLayerMisses(v, width, height);
+      const layerOrbit = perturbationEnabled
+        ? computeReferenceOrbit(lm.assemblyCenterRe, lm.assemblyCenterIm, maxIterations)
+        : undefined;
+      const layerSeries = (seriesEnabled && layerOrbit)
+        ? computeLayerSeriesSetup(layerOrbit, lm.assemblyWidth, lm.assemblyHeight, lm.scaleRe, lm.scaleIm, seriesValidityMode, seriesToleranceMode, seriesTolerance)
+        : undefined;
       const layer: RenderLayer = {
         primary: false,
         zoom: v.zoom,
@@ -865,9 +875,9 @@ const assembled = assembleFromCache(renderView, width, height, true);
         range: { colStart: lm.range.colStart, rowStart: lm.range.rowStart },
         levelDir: tag?.dir,
         levelIndex: tag?.level,
-        referenceOrbit: perturbationEnabled
-          ? computeReferenceOrbit(lm.assemblyCenterRe, lm.assemblyCenterIm, maxIterations)
-          : undefined,
+        referenceOrbit: layerOrbit,
+        seriesCoefficients: layerSeries?.seriesCoefficients,
+        skipIteration: layerSeries?.skipIteration,
       };
       for (const m of lm.misses) queue.push({ layer, ...m });
     }
