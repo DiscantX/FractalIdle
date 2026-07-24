@@ -63,7 +63,7 @@ function formatMs(value: number) {
 }
 
 export function updateStats() {
-  lastRenderOutput.textContent = formatMs(state.lastRenderMs);
+  lastRenderOutput.textContent = formatMs(state.lastPrimaryRenderMs);
   zoomOutput.textContent = `${state.view.zoom.toFixed(2)}×`;
   activeIterationsOutput.textContent = `${settingsEngine.getValue('maxIterations')}`;
   stepOutput.textContent = `${state.lastSteps.toLocaleString()}`;

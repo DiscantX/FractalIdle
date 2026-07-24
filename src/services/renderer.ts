@@ -31,7 +31,7 @@ import type { SeriesToleranceMode } from '../core/strategies/mandelbrot';
 // `(anonymous)`.
 export const renderCallbacks = {
   onRenderStart(_renderId: number) {},
-  onRenderComplete(_view: ViewState, _lastRenderMs: number, _totalSteps: number) {},
+  onRenderComplete(_view: ViewState, _lastPrimaryRenderMs: number, _totalSteps: number) {},
   onRenderCancel() {},
 };
 
@@ -414,6 +414,19 @@ export function requestRender(
   focalY?: number,
   opts?: { view?: ViewState; present?: boolean; stepFactor?: number },
 ) {
+  // A render still in flight when a new one is requested is about to be
+  // superseded: bumping activeRenderId below means none of ITS OWN completion
+  // paths (firePrimaryComplete / finalize) will ever run for it, since every
+  // one of them checks renderId === state.activeRenderId and will now see a
+  // mismatch. Left alone, that render's onRenderStart is never matched by a
+  // terminal callback — the exact mechanism behind the stuck badge. Signal its
+  // cancellation explicitly, the same way cancelActiveRender() already does
+  // for the explicit-cancel path. If cancelActiveRender() was just called
+  // (activeRender already null), this is a no-op, so the two paths compose
+  // without a double-cancel.
+  if (activeRender) {
+    renderCallbacks.onRenderCancel();
+  }
   state.activeRenderId += 1;
   markDebug('render:request', { nextRenderId: state.activeRenderId });
   renderFrame(state.activeRenderId, focalX, focalY, opts);
@@ -676,6 +689,15 @@ export function renderFrame(
   focalY?: number,
   opts?: { view?: ViewState; present?: boolean; stepFactor?: number },
 ) {
+  // True top of the render: Primary timing starts here, before any setup cost
+  // (signature/cache clearing, pool warm-up, assembly, reference-orbit/series
+  // computation) — all of that is real cost incurred to get the primary layer
+  // on screen. onRenderStart fires here too so the badge's live timer matches
+  // this same start point instead of starting later (after setup had already
+  // silently elapsed, which is part of why the two never agreed before).
+  const start = performance.now();
+  renderCallbacks.onRenderStart(renderId);
+
   // Clear cached tiles if a pixel-affecting setting changed since last render.
   ensureSignatureCurrent();
 
@@ -715,8 +737,6 @@ export function renderFrame(
   const stepFactor = opts?.stepFactor;
   const focusX = focalX ?? width / 2;
   const focusY = focalY ?? height / 2;
-
-  const start = performance.now();
 
   // Ensure the persistent pool is ready for this fractal and worker count. This
   // is the universal fallback: even if warmPool() was never called, the pool is
@@ -891,8 +911,6 @@ const assembled = assembleFromCache(renderView, width, height, true);
   // while the color animation owns the canvas (see presentNow/paintLive above).
   if (present && !isAnimationPlaying()) presentAssembly(assembled, state.view);
 
-  renderCallbacks.onRenderStart(renderId);
-
   let primaryDone = 0;
   let primaryComplete = false;
   let totalSteps = 0;
@@ -915,16 +933,16 @@ const assembled = assembleFromCache(renderView, width, height, true);
       renderContext.baseScalarField = assembleScalarField(state.view, width, height);
     }
     if (!renderContext.panActive) {
-      state.lastRenderMs = performance.now() - start;
+      state.lastPrimaryRenderMs = performance.now() - start;
       state.lastSteps = totalSteps;
       markDebug('render:finish', {
         primaryTotal,
         solidGuessedChunks,
         culledPixels,
         periodicityShortCircuits,
-        ms: Number(state.lastRenderMs.toFixed(2)),
+        ms: Number(state.lastPrimaryRenderMs.toFixed(2)),
       }, renderId);
-      renderCallbacks.onRenderComplete(renderView, state.lastRenderMs, totalSteps);
+      renderCallbacks.onRenderComplete(renderView, state.lastPrimaryRenderMs, totalSteps);
     } else if (renderContext.panActive && viewDrifted(renderView, state.view)) {
       // The user kept panning (or paused mid-drag) while this render was in
       // flight, so the live view has moved past what we just computed. Keep the
@@ -938,6 +956,16 @@ const assembled = assembleFromCache(renderView, width, height, true);
       // whatever new tiles it exposes.
       renderContext.panRenderScheduled = false;
     }
+};
+
+  // Total = every tile dispatched by this render (primary + all speculative
+  // look-ahead/behind layers) has finished — the "true cost" figure, for
+  // benchmarking, as opposed to Primary's "what the user actually waited to
+  // see" figure. Recorded wherever this render's work fully drains: the
+  // no-work fast path below, or finalize() once the queue empties.
+  const recordTotalComplete = () => {
+    if (renderId !== state.activeRenderId) return;
+    state.lastTotalRenderMs = performance.now() - start;
   };
 
   const buildTask = (q: QueuedTile): WorkerTask => ({
@@ -974,6 +1002,7 @@ const assembled = assembleFromCache(renderView, width, height, true);
       markDebug('render:finalize-stale', undefined, renderId);
       return;
     }
+    recordTotalComplete();
     // Last paint of the finished primary frame (a background zoom render skips it
     // until promoted). Look-ahead tiles were cache-only and need no paint.
     paintLive();
@@ -1035,9 +1064,22 @@ const assembled = assembleFromCache(renderView, width, height, true);
   // No work at all (fully cached, no look-ahead): present + complete immediately.
   if (!hasWork) {
     paintLive();
+    recordTotalComplete();
     firePrimaryComplete();
     if (activeRender && activeRender.renderId === renderId) activeRender = null;
     return;
+  }
+
+  // Primary itself is fully cached (zero misses) even though speculative
+  // layers still have work queued. handleResult only calls firePrimaryComplete
+  // when a PRIMARY tile arrives — with none queued here, it would never fire,
+  // leaving the badge/timer stuck on "Rendering..." for the rest of this
+  // render's (invisible) speculative work. This is the real bug, and it
+  // happens routinely — e.g. whenever a look-ahead layer successfully
+  // pre-cached the exact view you just landed on. Primary is already done.
+  if (primaryTotal === 0) {
+    paintLive();
+    firePrimaryComplete();
   }
 
   activeRender = { renderId, queue, outstanding: 0, buildTask, handleResult, handleDropped, finalize, present, presentNow };

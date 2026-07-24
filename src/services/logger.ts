@@ -52,7 +52,8 @@ export function appendRenderLog(scenario?: string) {
     chunkMode: settingsEngine.getValue('chunkMode') as ChunkMode,
     zoomMode: settingsEngine.getValue('zoomMode') as 'instant' | 'smooth',
     zoom: state.view.zoom,
-    lastRenderMs: state.lastRenderMs,
+    lastPrimaryRenderMs: state.lastPrimaryRenderMs,
+    lastTotalRenderMs: state.lastTotalRenderMs,
     lastSteps: state.lastSteps,
   });
   // Bound the array so a long dive can't grow it without limit.

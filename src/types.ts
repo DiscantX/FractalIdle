@@ -32,7 +32,8 @@ export type ColorSpace = 'hsl' | 'hsluv' | 'lch' | 'okhsl';
 export type RenderState = {
   view: ViewState;
   zoomAnimation: ZoomAnimationState | null;
-  lastRenderMs: number;
+  lastPrimaryRenderMs: number;
+  lastTotalRenderMs: number;
   lastSteps: number;
   activeRenderId: number;
 };
@@ -141,7 +142,8 @@ export type RenderLogEntry = {
   chunkMode: ChunkMode;
   zoomMode: 'instant' | 'smooth';
   zoom: number;
-  lastRenderMs: number;
+  lastPrimaryRenderMs: number;
+  lastTotalRenderMs: number;
   lastSteps: number;
 };
 

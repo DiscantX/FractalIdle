@@ -21,7 +21,8 @@ export const state: RenderState = {
     zoom: 1,
   },
   zoomAnimation: null,
-  lastRenderMs: 0,
+  lastPrimaryRenderMs: 0,
+  lastTotalRenderMs: 0,
   lastSteps: 0,
   activeRenderId: 0,
 };
