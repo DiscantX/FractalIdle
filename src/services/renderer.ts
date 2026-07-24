@@ -958,6 +958,8 @@ const assembled = assembleFromCache(renderView, width, height, true);
     geometricCulling,
     periodicityChecking,
     referenceOrbit: q.layer.referenceOrbit,
+    seriesCoefficients: q.layer.seriesCoefficients,
+    skipIteration: q.layer.skipIteration,
     interiorDetail: false,
     interiorNoiseMode: 'single',
     interiorNoiseStrength: 0,

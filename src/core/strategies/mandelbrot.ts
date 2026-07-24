@@ -349,7 +349,7 @@ export function perturbationEscapeIterations(
   // has ALREADY escaped (a legitimate outcome — series approximation only
   // bounds truncation error, not whether the point escapes), report that
   // directly rather than continuing a loop that would immediately exit.
-  if (seriesCoefficients && skipIteration && skipIteration > 0 && skipIteration < orbit.length - 1) {
+  if (seriesCoefficients && skipIteration && skipIteration > 0 && skipIteration < orbit.length) {
     const seeded = evaluateSeriesApproximation(seriesCoefficients, deltaRe, deltaIm, skipIteration);
     dRe = seeded.deltaRe;
     dIm = seeded.deltaIm;
